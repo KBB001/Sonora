@@ -1,0 +1,6 @@
+{
+  "name": "Sonora",
+  "description": "Personal music streaming app with YouTube audio playback, background Media3 service, and local Room library.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

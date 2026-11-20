@@ -1,0 +1,742 @@
+package com.example.ui.settings
+
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.BuildConfig
+import com.example.core.common.ApkInstaller
+import com.example.core.common.DurationFormatter
+import com.example.domain.model.AppThemeMode
+import com.example.domain.model.AppUpdateUiState
+import com.example.domain.model.AudioQuality
+import com.example.playback.EqualizerState
+import com.example.ui.components.SonoraIcons
+import kotlinx.coroutines.launch
+import java.io.File
+import java.util.Locale
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+fun SettingsScreen(
+    bottomContentPadding: PaddingValues,
+    onShowMessage: (String) -> Unit,
+    viewModel: SettingsViewModel = hiltViewModel()
+) {
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var showEqualizerSheet by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        viewModel.refreshCacheSize()
+    }
+
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                runCatching {
+                    val json = viewModel.generateBackupJson()
+                    context.contentResolver.openOutputStream(uri)?.use { stream ->
+                        stream.write(json.toByteArray(Charsets.UTF_8))
+                    }
+                }.onSuccess {
+                    onShowMessage("Library backup exported")
+                }.onFailure {
+                    onShowMessage("Backup export failed: ${it.localizedMessage}")
+                }
+            }
+        }
+    }
+
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val json = runCatching {
+                    context.contentResolver.openInputStream(uri)?.use { stream ->
+                        stream.bufferedReader().readText()
+                    }
+                }.getOrNull()
+                if (json.isNullOrBlank()) {
+                    onShowMessage("Could not read selected backup file")
+                } else {
+                    viewModel.restoreBackupJson(json) { result ->
+                        result.fold(
+                            onSuccess = { count ->
+                                onShowMessage("Restored $count tracks from backup")
+                            },
+                            onFailure = {
+                                onShowMessage("Invalid backup JSON file")
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    var pendingInstallFile by remember { mutableStateOf<File?>(null) }
+
+    val installPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) {
+        val file = pendingInstallFile
+        if (file != null && file.exists() && ApkInstaller.canRequestPackageInstalls(context)) {
+            ApkInstaller.launchApkInstaller(context, file).onFailure { err ->
+                onShowMessage("Не удалось открыть установщик: ${err.localizedMessage}")
+            }
+            pendingInstallFile = null
+        } else if (file != null && !ApkInstaller.canRequestPackageInstalls(context)) {
+            onShowMessage("Разрешите установку из этого источника, чтобы установить обновление")
+        }
+    }
+
+    fun triggerApkInstall(file: File) {
+        if (ApkInstaller.canRequestPackageInstalls(context)) {
+            ApkInstaller.launchApkInstaller(context, file).onFailure { err ->
+                onShowMessage("Не удалось запустить установщик: ${err.localizedMessage}")
+            }
+        } else {
+            pendingInstallFile = file
+            onShowMessage("Разрешите установку пакетов для Sonora в открывшемся окне")
+            installPermissionLauncher.launch(ApkInstaller.createUnknownSourcesSettingsIntent(context))
+        }
+    }
+
+    when (val updateState = uiState.updateState) {
+        is AppUpdateUiState.Available -> {
+            AlertDialog(
+                onDismissRequest = viewModel::dismissUpdateDialog,
+                title = { Text("Доступно обновление ${updateState.info.tagName}") },
+                text = {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 280.dp)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        Text(
+                            text = "Текущая версия: v${BuildConfig.VERSION_NAME}",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = updateState.info.releaseNotes,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            viewModel.startUpdateDownload(
+                                info = updateState.info,
+                                onReadyToInstall = ::triggerApkInstall,
+                                onError = onShowMessage
+                            )
+                        },
+                        modifier = Modifier.testTag("confirm_download_update_button")
+                    ) {
+                        Text("Скачать и установить")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = viewModel::dismissUpdateDialog) {
+                        Text("Позже")
+                    }
+                }
+            )
+        }
+
+        is AppUpdateUiState.Downloading -> {
+            AlertDialog(
+                onDismissRequest = {},
+                title = { Text("Загрузка ${updateState.info.tagName}") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        if (updateState.progress >= 0f) {
+                            LinearProgressIndicator(
+                                progress = { updateState.progress },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            val pct = (updateState.progress * 100).toInt()
+                            val downloadedMb = updateState.downloadedBytes / (1024f * 1024f)
+                            val totalMb = updateState.totalBytes / (1024f * 1024f)
+                            Text(
+                                text = String.format(
+                                    Locale.US,
+                                    "%d%% (%.1f / %.1f МБ)",
+                                    pct,
+                                    downloadedMb,
+                                    totalMb
+                                ),
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        } else {
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                            val downloadedMb = updateState.downloadedBytes / (1024f * 1024f)
+                            Text(
+                                text = String.format(Locale.US, "Загружено %.1f МБ...", downloadedMb),
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = {
+                    TextButton(onClick = viewModel::dismissUpdateDialog) {
+                        Text("Отмена")
+                    }
+                }
+            )
+        }
+
+        is AppUpdateUiState.ReadyToInstall -> {
+            AlertDialog(
+                onDismissRequest = viewModel::dismissUpdateDialog,
+                title = { Text("Обновление ${updateState.info.tagName} готово") },
+                text = {
+                    Text(
+                        text = "APK-файл загружен. Нажмите «Установить», чтобы запустить системный установщик.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = { triggerApkInstall(updateState.apkFile) },
+                        modifier = Modifier.testTag("install_apk_button")
+                    ) {
+                        Text("Установить")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = viewModel::dismissUpdateDialog) {
+                        Text("Закрыть")
+                    }
+                }
+            )
+        }
+
+        else -> Unit
+    }
+
+    if (showEqualizerSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showEqualizerSheet = false },
+            containerColor = MaterialTheme.colorScheme.surface
+        ) {
+            EqualizerSheetContent(
+                state = uiState.equalizerState,
+                onToggleEnabled = viewModel::setEqualizerEnabled,
+                onSelectPreset = viewModel::selectEqualizerPreset,
+                onBandChange = viewModel::setEqualizerBand
+            )
+        }
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
+        contentPadding = PaddingValues(
+            start = 16.dp,
+            end = 16.dp,
+            top = 12.dp,
+            bottom = bottomContentPadding.calculateBottomPadding() + 16.dp
+        ),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        item {
+            Text(
+                text = "Settings",
+                style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+        }
+
+        // App Updates (GitHub Releases OTA)
+        item {
+            val isCheckingUpdate = uiState.updateState is AppUpdateUiState.Checking
+            SettingsSectionCard(
+                title = "Обновление приложения",
+                icon = SonoraIcons.CloudDownload
+            ) {
+                Text(
+                    text = "Текущая версия: v${BuildConfig.VERSION_NAME} (сборка ${BuildConfig.VERSION_CODE})",
+                    style = MaterialTheme.typography.bodyLarge
+                )
+                Text(
+                    text = "Репозиторий: ${BuildConfig.GITHUB_REPOSITORY}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Button(
+                    onClick = { viewModel.checkForUpdates(onShowMessage) },
+                    enabled = !isCheckingUpdate,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("check_update_button")
+                ) {
+                    if (isCheckingUpdate) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Проверка обновлений...")
+                    } else {
+                        Icon(Icons.Rounded.Refresh, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Обновить приложение")
+                    }
+                }
+            }
+        }
+
+        // Audio Quality
+        item {
+            SettingsSectionCard(
+                title = "Audio Quality",
+                icon = SonoraIcons.HighQuality
+            ) {
+                AudioQuality.entries.forEach { quality ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { viewModel.setAudioQuality(quality) }
+                            .padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = uiState.settings.audioQuality == quality,
+                            onClick = { viewModel.setAudioQuality(quality) }
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = quality.label,
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                    }
+                }
+            }
+        }
+
+        // Playback Features
+        item {
+            SettingsSectionCard(
+                title = "Playback & Audio",
+                icon = SonoraIcons.GraphicEq
+            ) {
+                SettingsToggleRow(
+                    title = "Autoplay Radio",
+                    subtitle = "Automatically play similar tracks when queue ends",
+                    icon = SonoraIcons.AutoMode,
+                    checked = uiState.settings.autoplayEnabled,
+                    onCheckedChange = viewModel::setAutoplayEnabled,
+                    testTag = "toggle_autoplay"
+                )
+
+                SettingsToggleRow(
+                    title = "Skip Silence",
+                    subtitle = "Trim silent gaps in podcasts and tracks",
+                    icon = SonoraIcons.GraphicEq,
+                    checked = uiState.settings.skipSilenceEnabled,
+                    onCheckedChange = viewModel::setSkipSilenceEnabled,
+                    testTag = "toggle_skip_silence"
+                )
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { showEqualizerSheet = true }
+                        .padding(vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = SonoraIcons.Equalizer,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Column {
+                            Text("Equalizer", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                text = if (uiState.equalizerState.isAvailable) {
+                                    if (uiState.equalizerState.isEnabled) "Active" else "Tap to configure bands"
+                                } else {
+                                    "Start playing a track to activate equalizer"
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    OutlinedButton(onClick = { showEqualizerSheet = true }) {
+                        Text("Open")
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = SonoraIcons.Bedtime,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Text("Sleep Timer", style = MaterialTheme.typography.titleMedium)
+                    uiState.playbackState.sleepTimerRemainingMs?.let { rem ->
+                        Text(
+                            text = "(${DurationFormatter.formatMillis(rem)} left)",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val timerOptions = listOf(0 to "Off", 15 to "15m", 30 to "30m", 45 to "45m", 60 to "60m")
+                    timerOptions.forEach { (mins, label) ->
+                        val active = (mins == 0 && uiState.playbackState.sleepTimerRemainingMs == null)
+                        FilterChip(
+                            selected = active,
+                            onClick = {
+                                if (mins == 0) {
+                                    viewModel.cancelSleepTimer()
+                                    onShowMessage("Sleep timer cancelled")
+                                } else {
+                                    viewModel.startSleepTimer(mins)
+                                    onShowMessage("Sleep timer set for $mins minutes")
+                                }
+                            },
+                            label = { Text(label) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        )
+                    }
+                }
+            }
+        }
+
+        // Appearance
+        item {
+            SettingsSectionCard(
+                title = "Appearance",
+                icon = SonoraIcons.Palette
+            ) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    AppThemeMode.entries.forEach { mode ->
+                        FilterChip(
+                            selected = uiState.settings.themeMode == mode,
+                            onClick = { viewModel.setThemeMode(mode) },
+                            label = { Text(mode.label) }
+                        )
+                    }
+                }
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    SettingsToggleRow(
+                        title = "Material You Dynamic Color",
+                        subtitle = "Adapt app colors to your Android wallpaper",
+                        icon = SonoraIcons.ColorLens,
+                        checked = uiState.settings.dynamicColorEnabled,
+                        onCheckedChange = viewModel::setDynamicColorEnabled,
+                        testTag = "toggle_dynamic_color"
+                    )
+                }
+            }
+        }
+
+        // Cache & Backup
+        item {
+            SettingsSectionCard(
+                title = "Storage & Backup",
+                icon = SonoraIcons.CleaningServices
+            ) {
+                val mb = String.format(Locale.US, "%.1f MB", uiState.cacheSizeBytes / (1024f * 1024f))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Audio Stream Cache", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            text = "$mb used for instant replay",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            viewModel.clearCache { onShowMessage("Audio cache cleared") }
+                        },
+                        modifier = Modifier.testTag("clear_cache_button")
+                    ) {
+                        Text("Clear")
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Button(
+                        onClick = { exportLauncher.launch("sonora_library_backup.json") },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("export_backup_button")
+                    ) {
+                        Icon(SonoraIcons.FileUpload, contentDescription = null)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Export JSON")
+                    }
+                    OutlinedButton(
+                        onClick = { importLauncher.launch(arrayOf("application/json", "*/*")) },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("import_backup_button")
+                    ) {
+                        Icon(SonoraIcons.FileDownload, contentDescription = null)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Restore JSON")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsSectionCard(
+    title: String,
+    icon: ImageVector,
+    content: @Composable () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            content()
+        }
+    }
+}
+
+@Composable
+private fun SettingsToggleRow(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    testTag: String
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable { onCheckedChange(!checked) }
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            modifier = Modifier.testTag(testTag)
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun EqualizerSheetContent(
+    state: EqualizerState,
+    onToggleEnabled: (Boolean) -> Unit,
+    onSelectPreset: (Int) -> Unit,
+    onBandChange: (Int, Short) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp)
+            .padding(bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Audio Equalizer", style = MaterialTheme.typography.titleLarge)
+            Switch(
+                checked = state.isEnabled,
+                onCheckedChange = onToggleEnabled,
+                enabled = state.isAvailable
+            )
+        }
+
+        if (!state.isAvailable) {
+            Text(
+                text = "Start playing a track so ExoPlayer attaches an audio session to the equalizer.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            if (state.presetNames.isNotEmpty()) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    state.presetNames.forEachIndexed { index, name ->
+                        FilterChip(
+                            selected = index == state.selectedPresetIndex,
+                            onClick = { onSelectPreset(index) },
+                            label = { Text(name) }
+                        )
+                    }
+                }
+            }
+
+            state.bandLevels.forEachIndexed { index, levelMb ->
+                val hz = state.bandFrequenciesHz.getOrElse(index) { 0 }
+                val freqLabel = if (hz >= 1000) "${hz / 1000} kHz" else "$hz Hz"
+                val db = levelMb / 100f
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(freqLabel, style = MaterialTheme.typography.labelLarge)
+                        Text(
+                            text = String.format(Locale.US, "%+.1f dB", db),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Slider(
+                        value = levelMb.toFloat(),
+                        onValueChange = { newValue ->
+                            onBandChange(index, newValue.toInt().toShort())
+                        },
+                        valueRange = state.minLevelMb.toFloat()..state.maxLevelMb.toFloat(),
+                        enabled = state.isEnabled
+                    )
+                }
+            }
+        }
+    }
+}
