@@ -59,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.BuildConfig
+import com.example.core.common.ApkInstallCompatibility
 import com.example.core.common.ApkInstaller
 import com.example.core.common.DurationFormatter
 import com.example.domain.model.AppThemeMode
@@ -257,26 +258,75 @@ fun SettingsScreen(
         }
 
         is AppUpdateUiState.ReadyToInstall -> {
+            val compatibility = remember(updateState.apkFile) {
+                ApkInstaller.checkInstallCompatibility(context, updateState.apkFile)
+            }
             AlertDialog(
                 onDismissRequest = viewModel::dismissUpdateDialog,
-                title = { Text("Обновление ${updateState.info.tagName} готово") },
+                title = {
+                    Text(
+                        when (compatibility) {
+                            is ApkInstallCompatibility.SignatureMismatch ->
+                                "Требуется чистая переустановка (${updateState.info.tagName})"
+                            is ApkInstallCompatibility.VersionDowngrade ->
+                                "Версия APK ниже установленной"
+                            ApkInstallCompatibility.Compatible ->
+                                "Обновление ${updateState.info.tagName} готово"
+                        }
+                    )
+                },
                 text = {
                     Text(
-                        text = "APK-файл загружен. Нажмите «Установить», чтобы запустить системный установщик.",
+                        text = when (compatibility) {
+                            is ApkInstallCompatibility.SignatureMismatch ->
+                                "Новый APK подписан другим ключом, поэтому Android не установит его поверх текущей версии («Приложение не установлено»).\n\nСохраните файл в папку «Загрузки», удалите старую версию Sonora и установите скачанный APK."
+                            is ApkInstallCompatibility.VersionDowngrade ->
+                                "Код сборки в APK (${compatibility.archiveVersionCode}) ниже установленного (${compatibility.installedVersionCode}). Сохраните файл в «Загрузки» или переустановите приложение."
+                            ApkInstallCompatibility.Compatible ->
+                                "APK-файл загружен. Нажмите «Установить», чтобы запустить системный установщик."
+                        },
                         style = MaterialTheme.typography.bodyMedium
                     )
                 },
                 confirmButton = {
-                    Button(
-                        onClick = { triggerApkInstall(updateState.apkFile) },
-                        modifier = Modifier.testTag("install_apk_button")
-                    ) {
-                        Text("Установить")
+                    if (compatibility is ApkInstallCompatibility.SignatureMismatch) {
+                        Button(
+                            onClick = {
+                                ApkInstaller.saveApkToDownloads(
+                                    context = context,
+                                    apkFile = updateState.apkFile,
+                                    displayName = updateState.info.assetName.ifBlank {
+                                        "sonora-${updateState.info.tagName}.apk"
+                                    }
+                                ).onSuccess { savedName ->
+                                    viewModel.dismissUpdateDialog()
+                                    onShowMessage("Сохранено в Загрузки: $savedName. Удалите текущую версию и откройте файл.")
+                                }.onFailure { err ->
+                                    onShowMessage(err.localizedMessage ?: "Не удалось сохранить APK")
+                                }
+                            },
+                            modifier = Modifier.testTag("save_apk_downloads_button")
+                        ) {
+                            Text("В Загрузки")
+                        }
+                    } else {
+                        Button(
+                            onClick = { triggerApkInstall(updateState.apkFile) },
+                            modifier = Modifier.testTag("install_apk_button")
+                        ) {
+                            Text("Установить")
+                        }
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = viewModel::dismissUpdateDialog) {
-                        Text("Закрыть")
+                    if (compatibility is ApkInstallCompatibility.SignatureMismatch) {
+                        TextButton(onClick = { triggerApkInstall(updateState.apkFile) }) {
+                            Text("Установить")
+                        }
+                    } else {
+                        TextButton(onClick = viewModel::dismissUpdateDialog) {
+                            Text("Закрыть")
+                        }
                     }
                 }
             )

@@ -67,5 +67,18 @@ class ExampleUnitTest {
         assertTrue(YouTubeMusicAccountApi.hasAuthCookies(normalized))
         assertEquals("sapi_val", YouTubeMusicAccountApi.extractSapisid(normalized))
         assertFalse(YouTubeMusicAccountApi.hasAuthCookies("VISITOR_INFO1_LIVE=only_guest"))
+
+        // Personal account DATASYNC_ID ("112233||") must NOT produce a delegated Brand Page ID
+        org.junit.Assert.assertNull(YouTubeMusicAccountApi.extractDelegatedBrandPageId("112233445566||"))
+        org.junit.Assert.assertNull(YouTubeMusicAccountApi.extractDelegatedBrandPageId("112233445566||112233445566"))
+        assertEquals("1099887766", YouTubeMusicAccountApi.extractDelegatedBrandPageId("1099887766||112233445566"))
+
+        val multiAuth = YouTubeMusicAccountApi.buildSapisidAuthorizationHeader(
+            cookieHeader = "SAPISID=a; __Secure-1PAPISID=b; __Secure-3PAPISID=c; SID=s",
+            timestampSeconds = 1700000000L
+        ).orEmpty()
+        assertTrue(multiAuth.contains("SAPISIDHASH 1700000000_"))
+        assertTrue(multiAuth.contains("SAPISID1PHASH 1700000000_"))
+        assertTrue(multiAuth.contains("SAPISID3PHASH 1700000000_"))
     }
 }

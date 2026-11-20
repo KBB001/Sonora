@@ -56,14 +56,30 @@ class YouTubeMusicAccountApi @Inject constructor(
             )
         }
         runCatching {
-            val responseJson = executeInnerTubePost(
-                endpoint = "account/account_menu",
-                cookieHeader = cookieHeader,
-                visitorData = visitorData,
-                dataSyncId = dataSyncId,
-                authUserIndex = authUserIndex,
-                payload = JSONObject().put("deviceTheme", "DEVICE_THEME_SELECTED")
-            )
+            val responseJson = runCatching {
+                executeInnerTubePost(
+                    endpoint = "account/account_menu",
+                    cookieHeader = cookieHeader,
+                    visitorData = visitorData,
+                    dataSyncId = dataSyncId,
+                    authUserIndex = authUserIndex,
+                    payload = JSONObject().put("deviceTheme", "DEVICE_THEME_SELECTED"),
+                    useWebClient = false
+                )
+            }.getOrElse { primaryError ->
+                // Fallback to www.youtube.com WEB client if music.youtube.com rejects initial cookies/context
+                runCatching {
+                    executeInnerTubePost(
+                        endpoint = "account/account_menu",
+                        cookieHeader = cookieHeader,
+                        visitorData = visitorData,
+                        dataSyncId = "",
+                        authUserIndex = authUserIndex,
+                        payload = JSONObject(),
+                        useWebClient = true
+                    )
+                }.getOrElse { throw primaryError }
+            }
             parseAccountProfile(responseJson)
                 ?: throw IOException("Не удалось получить профиль YouTube. Проверьте авторизацию.")
         }
@@ -324,6 +340,7 @@ class YouTubeMusicAccountApi @Inject constructor(
     ): JSONObject {
         val origin = if (useWebClient) YOUTUBE_WEB_ORIGIN else YOUTUBE_MUSIC_ORIGIN
         val clientName = if (useWebClient) "WEB" else "WEB_REMIX"
+        val clientId = if (useWebClient) "1" else "67"
         val clientVersion = if (useWebClient) "2.20250310.01.00" else "1.20250310.01.00"
 
         val clientJson = JSONObject().apply {
@@ -336,8 +353,8 @@ class YouTubeMusicAccountApi @Inject constructor(
             }
         }
         val contextJson = JSONObject().put("client", clientJson)
-        val delegatedPageId = dataSyncId.substringBefore("||").trim()
-        if (delegatedPageId.isNotBlank() && delegatedPageId.startsWith("1")) {
+        val delegatedPageId = extractDelegatedBrandPageId(dataSyncId)
+        if (delegatedPageId != null) {
             contextJson.put(
                 "user",
                 JSONObject().put("onBehalfOfUser", delegatedPageId)
@@ -348,27 +365,29 @@ class YouTubeMusicAccountApi @Inject constructor(
             put("context", contextJson)
         }.toString()
 
-        val sapisid = extractSapisid(cookieHeader)
+        val authHeader = buildSapisidAuthorizationHeader(cookieHeader, origin)
             ?: throw IllegalStateException("Отсутствует cookie SAPISID")
-        val authHeader = buildSapisidHashHeader(sapisid, origin)
 
         val requestBuilder = Request.Builder()
             .url("$origin/youtubei/v1/$endpoint?prettyPrint=false")
             .header("User-Agent", DESKTOP_USER_AGENT)
             .header("Content-Type", "application/json")
-            .header("Accept", "application/json")
+            .header("Accept", "*/*")
             .header("Cookie", normalizeCookieHeader(cookieHeader))
             .header("Authorization", authHeader)
             .header("Origin", origin)
             .header("Referer", "$origin/")
             .header("X-Origin", origin)
-            .header("X-Goog-AuthUser", authUserIndex.toString())
+            .header("X-Youtube-Client-Name", clientId)
+            .header("X-Youtube-Client-Version", clientVersion)
+            .header("X-Youtube-Bootstrap-Logged-In", "true")
+            .header("X-Goog-AuthUser", authUserIndex.coerceAtLeast(0).toString())
             .post(fullBody.toRequestBody("application/json; charset=utf-8".toMediaType()))
 
         if (visitorData.isNotBlank()) {
             requestBuilder.header("X-Goog-Visitor-Id", visitorData)
         }
-        if (delegatedPageId.isNotBlank() && delegatedPageId.startsWith("1")) {
+        if (delegatedPageId != null) {
             requestBuilder.header("X-Goog-PageId", delegatedPageId)
         }
 
@@ -474,15 +493,48 @@ class YouTubeMusicAccountApi @Inject constructor(
             return hasSapisid && hasSid
         }
 
+        fun extractDelegatedBrandPageId(dataSyncId: String): String? {
+            val clean = dataSyncId.trim()
+            if (!clean.contains("||")) return null
+            val parts = clean.split("||", limit = 2)
+            val pageId = parts.getOrNull(0)?.trim().orEmpty()
+            val ownerId = parts.getOrNull(1)?.trim().orEmpty()
+            // Personal accounts have empty ownerId ("12345||") or identical ids; only Brand accounts delegate
+            return pageId.takeIf { it.isNotBlank() && ownerId.isNotBlank() && it != ownerId }
+        }
+
         fun buildSapisidHashHeader(
             sapisid: String,
             origin: String = YOUTUBE_MUSIC_ORIGIN,
-            timestampSeconds: Long = System.currentTimeMillis() / 1000L
+            timestampSeconds: Long = System.currentTimeMillis() / 1000L,
+            scheme: String = "SAPISIDHASH"
         ): String {
             val input = "$timestampSeconds $sapisid $origin"
             val digest = MessageDigest.getInstance("SHA-1").digest(input.toByteArray(Charsets.UTF_8))
             val hex = digest.joinToString("") { "%02x".format(it) }
-            return "SAPISIDHASH ${timestampSeconds}_$hex"
+            return "$scheme ${timestampSeconds}_$hex"
+        }
+
+        fun buildSapisidAuthorizationHeader(
+            cookieHeader: String,
+            origin: String = YOUTUBE_MUSIC_ORIGIN,
+            timestampSeconds: Long = System.currentTimeMillis() / 1000L
+        ): String? {
+            val map = parseCookieMap(normalizeCookieHeader(cookieHeader))
+            val sapisid = map["SAPISID"]
+            val p1 = map["__Secure-1PAPISID"]
+            val p3 = map["__Secure-3PAPISID"]
+            val primary = sapisid ?: p3 ?: p1 ?: return null
+
+            val tokens = mutableListOf<String>()
+            tokens += buildSapisidHashHeader(primary, origin, timestampSeconds, "SAPISIDHASH")
+            if (!p1.isNullOrBlank()) {
+                tokens += buildSapisidHashHeader(p1, origin, timestampSeconds, "SAPISID1PHASH")
+            }
+            if (!p3.isNullOrBlank()) {
+                tokens += buildSapisidHashHeader(p3, origin, timestampSeconds, "SAPISID3PHASH")
+            }
+            return tokens.joinToString(" ")
         }
 
         fun parseAccountProfile(root: JSONObject): YouTubeProfileInfo? {

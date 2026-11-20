@@ -93,9 +93,11 @@ fun YouTubeLoginScreen(
     fun collectMergedYouTubeCookies(): String {
         val cm = CookieManager.getInstance()
         cm.flush()
-        val musicCookies = cm.getCookie("https://music.youtube.com").orEmpty()
+        val rootYtCookies = cm.getCookie("https://youtube.com").orEmpty()
         val ytCookies = cm.getCookie("https://www.youtube.com").orEmpty()
+        val musicCookies = cm.getCookie("https://music.youtube.com").orEmpty()
         val merged = LinkedHashMap<String, String>()
+        YouTubeMusicAccountApi.parseCookieMap(rootYtCookies).forEach { (k, v) -> merged[k] = v }
         YouTubeMusicAccountApi.parseCookieMap(ytCookies).forEach { (k, v) -> merged[k] = v }
         YouTubeMusicAccountApi.parseCookieMap(musicCookies).forEach { (k, v) -> merged[k] = v }
         return merged.entries.joinToString("; ") { "${it.key}=${it.value}" }
@@ -116,9 +118,10 @@ fun YouTubeLoginScreen(
                 try {
                     if (window.ytcfg && typeof window.ytcfg.get === 'function') {
                         return JSON.stringify({
+                            loggedIn: Boolean(window.ytcfg.get('LOGGED_IN')),
                             visitorData: window.ytcfg.get('VISITOR_DATA') || '',
                             dataSyncId: window.ytcfg.get('DATASYNC_ID') || '',
-                            sessionIndex: window.ytcfg.get('SESSION_INDEX') || 0
+                            sessionIndex: String(window.ytcfg.get('SESSION_INDEX') ?? '0')
                         });
                     }
                 } catch (e) {}
@@ -135,9 +138,16 @@ fun YouTubeLoginScreen(
                     ?.replace("\\\\", "\\")
                     .orEmpty()
                 val json = runCatching { JSONObject(cleaned) }.getOrNull()
+                val loggedInFlag = json?.optBoolean("loggedIn", true) ?: true
+                if (!manualTrigger && json != null && json.has("loggedIn") && !loggedInFlag) {
+                    hasCapturedLogin = false
+                    return@evaluateJavascript
+                }
                 val visitorData = json?.optString("visitorData").orEmpty()
                 val dataSyncId = json?.optString("dataSyncId").orEmpty()
-                val sessionIndex = json?.optInt("sessionIndex", 0) ?: 0
+                val sessionIndex = json?.optString("sessionIndex")?.toIntOrNull()
+                    ?: json?.optInt("sessionIndex", 0)
+                    ?: 0
 
                 viewModel.signInWithSession(
                     cookieHeader = mergedCookie,
