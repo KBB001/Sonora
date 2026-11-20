@@ -1,3 +1,5 @@
+[![Android CI](https://github.com/KBB001/Sonora/actions/workflows/ci.yml/badge.svg)](https://github.com/KBB001/Sonora/actions/workflows/ci.yml)
+
 # Sonora
 
 Музыкальное стриминг-приложение для Android (аналог YouTube Music / Spotify) на **Kotlin** и **Jetpack Compose** с фоновым воспроизведением, локальной медиатекой, эквалайзером и встроенным автообновлением через GitHub Releases.
