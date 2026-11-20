@@ -36,16 +36,45 @@ jobs:
           if [ ! -f "debug.keystore" ] && [ -f "debug.keystore.base64" ]; then
             tr -d '[:space:]' < debug.keystore.base64 | base64 --decode > debug.keystore
           fi
+          if [ ! -f "debug.keystore" ]; then
+            echo "Generating fallback debug.keystore for CI..."
+            keytool -genkeypair -noprompt \
+              -keystore debug.keystore \
+              -alias androiddebugkey \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -storepass android \
+              -keypass android \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
 
       - name: Accept Android SDK licenses
         shell: bash
         run: |
-          SDK_MANAGER="${ANDROID_HOME:-$ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager"
-          if [ -x "$SDK_MANAGER" ]; then
+          SDK_ROOT="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          SDK_MANAGER=$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager 2>/dev/null | head -n 1 || true)
+          if [ -n "$SDK_MANAGER" ] && [ -x "$SDK_MANAGER" ]; then
             yes | "$SDK_MANAGER" --licenses > /dev/null 2>&1 || true
           fi
 
       - name: Run Unit Tests & Assemble Debug APK
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: gradle :app:testDebugUnitTest :app:assembleDebug --no-daemon --stacktrace
+          JAVA_TOOL_OPTIONS: "-Djava.awt.headless=true"
+        run: >
+          gradle :app:testDebugUnitTest :app:assembleDebug
+          --no-daemon
+          --no-configuration-cache
+          --no-build-cache
+          --max-workers=2
+          --console=plain
+          -Dorg.gradle.jvmargs="-Xmx3072m -XX:MaxMetaspaceSize=1024m -Dfile.encoding=UTF-8 -Djava.awt.headless=true"
+
+      - name: Upload Test Reports on Failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: app/build/reports/tests/
+          if-no-files-found: ignore

@@ -113,7 +113,7 @@ fun PlaylistDetailScreen(
                     )
                     if (!playlist?.description.isNullOrBlank()) {
                         Text(
-                            text = playlist?.description.orEmpty(),
+                            text = playlist.description,
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

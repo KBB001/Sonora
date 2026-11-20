@@ -66,6 +66,17 @@ jobs:
           if [ ! -f "debug.keystore" ] && [ -f "debug.keystore.base64" ]; then
             tr -d '[:space:]' < debug.keystore.base64 | base64 --decode > debug.keystore
           fi
+          if [ ! -f "debug.keystore" ]; then
+            keytool -genkeypair -noprompt \
+              -keystore debug.keystore \
+              -alias androiddebugkey \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -storepass android \
+              -keypass android \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
 
           if [ -n "$KEYSTORE_BASE64" ]; then
             if [ -z "$KEYSTORE_PASSWORD" ]; then
@@ -93,8 +104,9 @@ jobs:
       - name: Accept Android SDK licenses
         shell: bash
         run: |
-          SDK_MANAGER="${ANDROID_HOME:-$ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager"
-          if [ -x "$SDK_MANAGER" ]; then
+          SDK_ROOT="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          SDK_MANAGER=$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager 2>/dev/null | head -n 1 || true)
+          if [ -n "$SDK_MANAGER" ] && [ -x "$SDK_MANAGER" ]; then
             yes | "$SDK_MANAGER" --licenses > /dev/null 2>&1 || true
           fi
 
@@ -106,7 +118,15 @@ jobs:
           APP_VERSION_NAME: ${{ steps.version.outputs.version_name }}
           APP_VERSION_CODE: ${{ steps.version.outputs.version_code }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: gradle :app:assembleRelease --no-daemon
+          JAVA_TOOL_OPTIONS: "-Djava.awt.headless=true"
+        run: >
+          gradle :app:assembleRelease
+          --no-daemon
+          --no-configuration-cache
+          --no-build-cache
+          --max-workers=2
+          --console=plain
+          -Dorg.gradle.jvmargs="-Xmx3072m -XX:MaxMetaspaceSize=1024m -Dfile.encoding=UTF-8 -Djava.awt.headless=true"
 
       - name: Prepare Release APK Artifact
         shell: bash

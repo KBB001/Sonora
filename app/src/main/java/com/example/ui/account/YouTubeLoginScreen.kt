@@ -2,11 +2,16 @@ package com.example.ui.account
 
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
+import android.os.Build
+import android.view.View
+import android.view.ViewGroup
 import android.webkit.CookieManager
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -70,6 +75,20 @@ fun YouTubeLoginScreen(
     var currentUrl by remember { mutableStateOf(YOUTUBE_LOGIN_URL) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var hasCapturedLogin by remember { mutableStateOf(false) }
+    var canGoBack by remember { mutableStateOf(false) }
+    var useSoftwareLayer by remember { mutableStateOf(false) }
+    var webViewGeneration by remember { mutableIntStateOf(0) }
+    var renderRecoveryCount by remember { mutableIntStateOf(0) }
+
+    BackHandler(enabled = canGoBack) {
+        val wv = webViewRef
+        if (wv != null && wv.canGoBack()) {
+            wv.goBack()
+        } else {
+            canGoBack = false
+            onBack()
+        }
+    }
 
     fun collectMergedYouTubeCookies(): String {
         val cm = CookieManager.getInstance()
@@ -148,10 +167,15 @@ fun YouTubeLoginScreen(
         }
     }
 
-    DisposableEffect(Unit) {
+    DisposableEffect(webViewGeneration) {
         onDispose {
-            webViewRef?.stopLoading()
-            webViewRef?.destroy()
+            webViewRef?.let { wv ->
+                runCatching {
+                    wv.stopLoading()
+                    (wv.parent as? ViewGroup)?.removeView(wv)
+                    wv.destroy()
+                }
+            }
             webViewRef = null
         }
     }
@@ -216,60 +240,98 @@ fun YouTubeLoginScreen(
 
         Box(modifier = Modifier.weight(1f)) {
             @SuppressLint("SetJavaScriptEnabled")
-            AndroidView(
-                modifier = Modifier.fillMaxSize(),
-                factory = { ctx ->
-                    val cookieManager = CookieManager.getInstance()
-                    cookieManager.setAcceptCookie(true)
-                    if (resetSession) {
-                        cookieManager.removeAllCookies(null)
-                        cookieManager.flush()
-                    }
-                    WebView(ctx).apply {
-                        webViewRef = this
-                        cookieManager.setAcceptThirdPartyCookies(this, true)
-                        settings.javaScriptEnabled = true
-                        settings.domStorageEnabled = true
-                        settings.databaseEnabled = true
-                        settings.useWideViewPort = true
-                        settings.loadWithOverviewMode = true
-                        webChromeClient = object : WebChromeClient() {
-                            override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                                pageProgress = newProgress
-                            }
+            androidx.compose.runtime.key(webViewGeneration) {
+                AndroidView(
+                    modifier = Modifier.fillMaxSize(),
+                    factory = { ctx ->
+                        val cookieManager = CookieManager.getInstance()
+                        cookieManager.setAcceptCookie(true)
+                        if (resetSession && webViewGeneration == 0) {
+                            cookieManager.removeAllCookies(null)
+                            cookieManager.flush()
                         }
-                        webViewClient = object : WebViewClient() {
-                            override fun shouldOverrideUrlLoading(
-                                view: WebView?,
-                                request: WebResourceRequest?
-                            ): Boolean {
-                                val nextUrl = request?.url?.toString().orEmpty()
-                                currentUrl = nextUrl
-                                return false
+                        WebView(ctx).apply {
+                            webViewRef = this
+                            if (useSoftwareLayer) {
+                                setLayerType(View.LAYER_TYPE_SOFTWARE, null)
                             }
-
-                            override fun onPageStarted(
-                                view: WebView?,
-                                url: String?,
-                                favicon: Bitmap?
-                            ) {
-                                currentUrl = url.orEmpty()
-                            }
-
-                            override fun onPageFinished(view: WebView?, url: String?) {
-                                val finishedUrl = url.orEmpty()
-                                currentUrl = finishedUrl
-                                val isYouTubeDomain = finishedUrl.contains("music.youtube.com") ||
-                                    finishedUrl.contains("www.youtube.com")
-                                if (isYouTubeDomain && !finishedUrl.contains("accounts.google.com")) {
-                                    tryFinalizeLogin(view, manualTrigger = false)
+                            cookieManager.setAcceptThirdPartyCookies(this, true)
+                            settings.javaScriptEnabled = true
+                            settings.domStorageEnabled = true
+                            settings.useWideViewPort = true
+                            settings.loadWithOverviewMode = true
+                            webChromeClient = object : WebChromeClient() {
+                                override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                                    pageProgress = newProgress
                                 }
                             }
+                            webViewClient = object : WebViewClient() {
+                                override fun shouldOverrideUrlLoading(
+                                    view: WebView?,
+                                    request: WebResourceRequest?
+                                ): Boolean {
+                                    val nextUrl = request?.url?.toString().orEmpty()
+                                    currentUrl = nextUrl
+                                    return false
+                                }
+
+                                override fun onPageStarted(
+                                    view: WebView?,
+                                    url: String?,
+                                    favicon: Bitmap?
+                                ) {
+                                    currentUrl = url.orEmpty()
+                                    canGoBack = view?.canGoBack() == true
+                                }
+
+                                override fun onPageFinished(view: WebView?, url: String?) {
+                                    val finishedUrl = url.orEmpty()
+                                    currentUrl = finishedUrl
+                                    canGoBack = view?.canGoBack() == true
+                                    val isYouTubeDomain = finishedUrl.contains("music.youtube.com") ||
+                                        finishedUrl.contains("www.youtube.com")
+                                    if (isYouTubeDomain && !finishedUrl.contains("accounts.google.com")) {
+                                        tryFinalizeLogin(view, manualTrigger = false)
+                                    }
+                                }
+
+                                override fun onRenderProcessGone(
+                                    view: WebView?,
+                                    detail: RenderProcessGoneDetail?
+                                ): Boolean {
+                                    // Prevent host app termination when GPU/rendernode fails on headless emulators
+                                    val crashed = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                        detail?.didCrash() == true
+                                    } else {
+                                        true
+                                    }
+                                    runCatching {
+                                        view?.stopLoading()
+                                        (view?.parent as? ViewGroup)?.removeView(view)
+                                        view?.destroy()
+                                    }
+                                    webViewRef = null
+                                    useSoftwareLayer = true
+                                    if (renderRecoveryCount < 2) {
+                                        renderRecoveryCount += 1
+                                        webViewGeneration += 1
+                                    } else {
+                                        onShowMessage(
+                                            if (crashed) {
+                                                "Браузер переключился в безопасный режим — нажмите Обновить"
+                                            } else {
+                                                "Страница авторизации перезапущена"
+                                            }
+                                        )
+                                    }
+                                    return true
+                                }
+                            }
+                            loadUrl(YOUTUBE_LOGIN_URL)
                         }
-                        loadUrl(YOUTUBE_LOGIN_URL)
                     }
-                }
-            )
+                )
+            }
 
             if (uiState.isSigningIn) {
                 Surface(

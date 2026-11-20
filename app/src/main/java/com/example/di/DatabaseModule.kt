@@ -21,9 +21,9 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object DatabaseModule {
 
-    private val MIGRATION_2_3 = object : Migration(2, 3) {
+    internal val MIGRATION_2_3 = object : Migration(2, 3) {
         override fun migrate(db: SupportSQLiteDatabase) {
-            db.execSQL("ALTER TABLE playlists ADD COLUMN youtubePlaylistId TEXT DEFAULT NULL")
+            db.execSQL("ALTER TABLE playlists ADD COLUMN youtubePlaylistId TEXT")
         }
     }
 

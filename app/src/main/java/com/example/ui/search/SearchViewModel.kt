@@ -139,24 +139,34 @@ class SearchViewModel @Inject constructor(
         )
     }
 
-    val uiState: StateFlow<SearchUiState> = combine(
+    private val searchInputsFlow = combine(
         queryFlow,
         filterFlow,
         suggestionsFlow,
         localMatchesFlow,
-        filteredHistoryFlow,
+        filteredHistoryFlow
+    ) { query, filter, suggestions, localMatches, searchHistory ->
+        SearchInputs(
+            query = query,
+            filter = filter,
+            suggestions = suggestions,
+            localMatches = localMatches,
+            searchHistory = searchHistory
+        )
+    }
+
+    val uiState: StateFlow<SearchUiState> = combine(
+        searchInputsFlow,
         resultsFlow,
         librarySignalsFlow
-    ) { values ->
-        @Suppress("UNCHECKED_CAST")
-        val signals = values[6] as LibrarySignals
+    ) { inputs, resultsState, signals ->
         SearchUiState(
-            query = values[0] as String,
-            selectedFilter = values[1] as SearchFilter,
-            suggestions = values[2] as List<String>,
-            localMatches = values[3] as List<Track>,
-            searchHistory = values[4] as List<String>,
-            resultsState = values[5] as SearchResultsState,
+            query = inputs.query,
+            selectedFilter = inputs.filter,
+            suggestions = inputs.suggestions,
+            localMatches = inputs.localMatches,
+            searchHistory = inputs.searchHistory,
+            resultsState = resultsState,
             favoriteIds = signals.favoriteIds,
             downloadedIds = signals.downloadedIds,
             downloadingIds = signals.downloadingIds,
@@ -354,6 +364,14 @@ class SearchViewModel @Inject constructor(
         return input.contains("youtube.com", ignoreCase = true) &&
             input.contains("list=", ignoreCase = true)
     }
+
+    private data class SearchInputs(
+        val query: String,
+        val filter: SearchFilter,
+        val suggestions: List<String>,
+        val localMatches: List<Track>,
+        val searchHistory: List<String>
+    )
 
     private data class LibrarySignals(
         val favoriteIds: Set<String>,

@@ -95,4 +95,44 @@ class ExampleRobolectricTest {
     assertEquals("Road Trip", playlists[0].title)
     assertEquals(18, playlists[0].trackCount)
   }
+
+  @Test
+  fun `room migration 2 to 3 preserves playlists and validates schema`() = kotlinx.coroutines.runBlocking {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val dbName = "migration_test_${System.nanoTime()}.db"
+    val helper = object : android.database.sqlite.SQLiteOpenHelper(context, dbName, null, 2) {
+      override fun onCreate(db: android.database.sqlite.SQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS `favorite_tracks` (`id` TEXT NOT NULL, `title` TEXT NOT NULL, `artist` TEXT NOT NULL, `durationSeconds` INTEGER NOT NULL, `thumbnailUrl` TEXT NOT NULL, `addedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `history_tracks` (`id` TEXT NOT NULL, `title` TEXT NOT NULL, `artist` TEXT NOT NULL, `durationSeconds` INTEGER NOT NULL, `thumbnailUrl` TEXT NOT NULL, `playedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `playlists` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `name` TEXT NOT NULL, `description` TEXT NOT NULL, `coverUrl` TEXT, `createdAt` INTEGER NOT NULL)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `playlist_tracks` (`playlistId` INTEGER NOT NULL, `trackId` TEXT NOT NULL, `title` TEXT NOT NULL, `artist` TEXT NOT NULL, `durationSeconds` INTEGER NOT NULL, `thumbnailUrl` TEXT NOT NULL, `addedAt` INTEGER NOT NULL, PRIMARY KEY(`playlistId`, `trackId`), FOREIGN KEY(`playlistId`) REFERENCES `playlists`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_playlist_tracks_playlistId` ON `playlist_tracks` (`playlistId`)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `downloaded_tracks` (`id` TEXT NOT NULL, `title` TEXT NOT NULL, `artist` TEXT NOT NULL, `durationSeconds` INTEGER NOT NULL, `thumbnailUrl` TEXT NOT NULL, `localFilePath` TEXT NOT NULL, `fileSizeBytes` INTEGER NOT NULL, `downloadedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `search_history` (`query` TEXT NOT NULL, `searchedAt` INTEGER NOT NULL, PRIMARY KEY(`query`))")
+        db.execSQL("INSERT INTO `playlists` (`id`, `name`, `description`, `coverUrl`, `createdAt`) VALUES (1, 'Saved Local', 'Desc', NULL, 1000)")
+      }
+
+      override fun onUpgrade(db: android.database.sqlite.SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    }
+    helper.writableDatabase.close()
+    helper.close()
+
+    val migratedDb = androidx.room.Room.databaseBuilder(
+      context,
+      com.example.data.local.SonoraDatabase::class.java,
+      dbName
+    )
+      .addMigrations(com.example.di.DatabaseModule.MIGRATION_2_3)
+      .allowMainThreadQueries()
+      .build()
+
+    try {
+      val playlist = migratedDb.playlistDao().findByNameIgnoreCase("Saved Local")
+      assertEquals(1L, playlist?.id)
+      org.junit.Assert.assertNull(playlist?.youtubePlaylistId)
+    } finally {
+      migratedDb.close()
+      context.deleteDatabase(dbName)
+    }
+  }
 }
