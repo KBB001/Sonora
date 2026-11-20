@@ -1,5 +1,6 @@
 package com.example.data.remote
 
+import com.example.data.repository.YouTubeAccountStore
 import okhttp3.Headers.Companion.toHeaders
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
@@ -9,12 +10,14 @@ import org.schabi.newpipe.extractor.downloader.Request
 import org.schabi.newpipe.extractor.downloader.Response
 import org.schabi.newpipe.extractor.exceptions.ReCaptchaException
 import java.io.IOException
+import java.net.URI
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class NewPipeDownloader @Inject constructor(
-    private val okHttpClient: OkHttpClient
+    private val okHttpClient: OkHttpClient,
+    private val accountStore: YouTubeAccountStore
 ) : Downloader() {
 
     @Throws(IOException::class, ReCaptchaException::class)
@@ -30,11 +33,27 @@ class NewPipeDownloader @Inject constructor(
             bytes.toRequestBody(contentType.toMediaTypeOrNull())
         }
 
+        val activeAccount = if (isYouTubeHost(url)) accountStore.getActiveAccountSnapshot() else null
+
         val okHttpHeaders = buildMap {
             put("User-Agent", USER_AGENT)
             headers.forEach { (key, values) ->
                 if (values.isNotEmpty()) {
                     put(key, values.joinToString(", "))
+                }
+            }
+            if (activeAccount != null && activeAccount.cookieHeader.isNotBlank()) {
+                put("Cookie", activeAccount.cookieHeader)
+                put("X-Goog-AuthUser", activeAccount.authUserIndex.toString())
+                YouTubeMusicAccountApi.extractSapisid(activeAccount.cookieHeader)?.let { sapisid ->
+                    put(
+                        "Authorization",
+                        YouTubeMusicAccountApi.buildSapisidHashHeader(
+                            sapisid = sapisid,
+                            origin = YouTubeMusicAccountApi.YOUTUBE_WEB_ORIGIN
+                        )
+                    )
+                    put("X-Origin", YouTubeMusicAccountApi.YOUTUBE_WEB_ORIGIN)
                 }
             }
         }.toHeaders()
@@ -64,6 +83,14 @@ class NewPipeDownloader @Inject constructor(
                 response.request.url.toString()
             )
         }
+    }
+
+    private fun isYouTubeHost(url: String): Boolean {
+        val host = runCatching { URI(url).host?.lowercase() }.getOrNull() ?: return false
+        return host == "youtube.com" ||
+            host.endsWith(".youtube.com") ||
+            host == "youtubei.googleapis.com" ||
+            host == "youtu.be"
     }
 
     private companion object {

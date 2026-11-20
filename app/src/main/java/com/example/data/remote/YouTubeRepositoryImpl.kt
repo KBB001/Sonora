@@ -1,6 +1,7 @@
 package com.example.data.remote
 
 import com.example.core.common.NetworkMonitor
+import com.example.data.repository.YouTubeAccountStore
 import com.example.domain.model.AudioQuality
 import com.example.domain.model.Track
 import com.example.domain.model.YouTubeArtistSummary
@@ -9,6 +10,7 @@ import com.example.domain.repository.YouTubeRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -39,8 +41,12 @@ import javax.inject.Singleton
 @Singleton
 class YouTubeRepositoryImpl @Inject constructor(
     private val okHttpClient: OkHttpClient,
-    private val networkMonitor: NetworkMonitor? = null
+    private val networkMonitor: NetworkMonitor? = null,
+    private val accountStore: YouTubeAccountStore? = null,
+    private val youTubeMusicAccountApi: YouTubeMusicAccountApi? = null
 ) : YouTubeRepository {
+
+    constructor(okHttpClient: OkHttpClient) : this(okHttpClient, null, null, null)
 
     private val youtubeService = ServiceList.YouTube
     private val fallbackHttpClient by lazy {
@@ -301,12 +307,22 @@ class YouTubeRepositoryImpl @Inject constructor(
             primaryError = e
         }
 
-        // 2. Fallback: Direct InnerTube alternative client profiles
+        // 2. Fallback: Authenticated user session (if signed in to YouTube)
+        val activeAccount = accountStore?.getActiveAccountSnapshot()
+        if (activeAccount != null && youTubeMusicAccountApi != null) {
+            runBlocking {
+                youTubeMusicAccountApi.resolveAuthenticatedStreamUrl(activeAccount, cleanId, audioQuality)
+            }?.let { url ->
+                return Result.success(url)
+            }
+        }
+
+        // 3. Fallback: Direct InnerTube alternative client profiles
         fetchViaInnerTubeClients(cleanId, audioQuality)?.let { url ->
             return Result.success(url)
         }
 
-        // 3. Fallback: Public Piped / Invidious audio endpoints
+        // 4. Fallback: Public Piped / Invidious audio endpoints
         fetchViaPipedInstances(cleanId, audioQuality)?.let { url ->
             return Result.success(url)
         }

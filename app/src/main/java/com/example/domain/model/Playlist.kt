@@ -9,5 +9,6 @@ data class Playlist(
     val description: String = "",
     val coverUrl: String? = null,
     val trackCount: Int = 0,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val youtubePlaylistId: String? = null
 )

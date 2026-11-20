@@ -14,7 +14,8 @@ data class PlaylistSummaryTuple(
     val description: String,
     val coverUrl: String?,
     val createdAt: Long,
-    val trackCount: Int
+    val trackCount: Int,
+    val youtubePlaylistId: String?
 )
 
 @Dao
@@ -24,7 +25,8 @@ interface PlaylistDao {
         SELECT p.id, p.name, p.description,
                COALESCE(p.coverUrl, (SELECT pt.thumbnailUrl FROM playlist_tracks pt WHERE pt.playlistId = p.id ORDER BY pt.addedAt ASC LIMIT 1)) AS coverUrl,
                p.createdAt,
-               (SELECT COUNT(*) FROM playlist_tracks pt WHERE pt.playlistId = p.id) AS trackCount
+               (SELECT COUNT(*) FROM playlist_tracks pt WHERE pt.playlistId = p.id) AS trackCount,
+               p.youtubePlaylistId
         FROM playlists p
         ORDER BY p.createdAt DESC
         """
@@ -36,7 +38,8 @@ interface PlaylistDao {
         SELECT p.id, p.name, p.description,
                COALESCE(p.coverUrl, (SELECT pt.thumbnailUrl FROM playlist_tracks pt WHERE pt.playlistId = p.id ORDER BY pt.addedAt ASC LIMIT 1)) AS coverUrl,
                p.createdAt,
-               (SELECT COUNT(*) FROM playlist_tracks pt WHERE pt.playlistId = p.id) AS trackCount
+               (SELECT COUNT(*) FROM playlist_tracks pt WHERE pt.playlistId = p.id) AS trackCount,
+               p.youtubePlaylistId
         FROM playlists p
         WHERE p.id = :playlistId
         """
@@ -45,6 +48,21 @@ interface PlaylistDao {
 
     @Query("SELECT * FROM playlist_tracks WHERE playlistId = :playlistId ORDER BY addedAt ASC")
     fun observePlaylistTracks(playlistId: Long): Flow<List<PlaylistTrackEntity>>
+
+    @Query("SELECT trackId FROM playlist_tracks WHERE playlistId = :playlistId")
+    suspend fun getPlaylistTrackIds(playlistId: Long): List<String>
+
+    @Query("SELECT * FROM playlists WHERE youtubePlaylistId = :youtubePlaylistId LIMIT 1")
+    suspend fun findByYoutubePlaylistId(youtubePlaylistId: String): PlaylistEntity?
+
+    @Query("SELECT * FROM playlists WHERE LOWER(TRIM(name)) = LOWER(TRIM(:name)) LIMIT 1")
+    suspend fun findByNameIgnoreCase(name: String): PlaylistEntity?
+
+    @Query("SELECT youtubePlaylistId FROM playlists WHERE id = :playlistId")
+    suspend fun getYoutubePlaylistId(playlistId: Long): String?
+
+    @Query("UPDATE playlists SET youtubePlaylistId = :youtubePlaylistId WHERE id = :playlistId")
+    suspend fun updateYoutubePlaylistId(playlistId: Long, youtubePlaylistId: String)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPlaylist(playlist: PlaylistEntity): Long

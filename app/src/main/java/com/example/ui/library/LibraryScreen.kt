@@ -56,6 +56,8 @@ import coil.compose.AsyncImage
 import com.example.R
 import com.example.domain.model.Playlist
 import com.example.domain.model.Track
+import com.example.ui.account.LibraryAccountSyncBanner
+import com.example.ui.account.YouTubeAccountViewModel
 import com.example.ui.components.AddToPlaylistDialog
 import com.example.ui.components.CreatePlaylistDialog
 import com.example.ui.components.ImportYouTubePlaylistDialog
@@ -66,11 +68,14 @@ import com.example.ui.components.TrackRowItem
 @Composable
 fun LibraryScreen(
     onOpenPlaylist: (Long) -> Unit,
+    onOpenYouTubeLogin: () -> Unit,
     bottomContentPadding: PaddingValues,
     onShowMessage: (String) -> Unit,
-    viewModel: LibraryViewModel = hiltViewModel()
+    viewModel: LibraryViewModel = hiltViewModel(),
+    accountViewModel: YouTubeAccountViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val accountUiState by accountViewModel.uiState.collectAsStateWithLifecycle()
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
     var showImportDialog by remember { mutableStateOf(false) }
@@ -175,7 +180,15 @@ fun LibraryScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(10.dp))
+
+        LibraryAccountSyncBanner(
+            uiState = accountUiState,
+            onOpenLogin = onOpenYouTubeLogin,
+            onSyncNow = { accountViewModel.syncAndMergeActiveAccount(onShowMessage) }
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
 
         val tabs = listOf(
             "Playlists",

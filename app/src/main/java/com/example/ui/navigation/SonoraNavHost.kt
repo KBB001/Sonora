@@ -53,6 +53,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.toRoute
+import com.example.ui.account.YouTubeLoginScreen
 import com.example.ui.components.MiniPlayerBar
 import com.example.ui.components.SonoraIcons
 import com.example.ui.home.HomeScreen
@@ -111,6 +113,8 @@ fun SonoraNavHost(
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = backStackEntry?.destination
     val isNowPlayingScreen = currentDestination?.hasRoute<SonoraRoute.NowPlaying>() == true
+    val isFullScreenOverlay = isNowPlayingScreen ||
+        currentDestination?.hasRoute<SonoraRoute.YouTubeLogin>() == true
 
     val playerUiState by playerViewModel.uiState.collectAsStateWithLifecycle()
     val playbackState = playerUiState.playbackState
@@ -155,7 +159,7 @@ fun SonoraNavHost(
                 )
             },
             bottomBar = {
-                if (!isNowPlayingScreen && !useNavigationRail) {
+                if (!isFullScreenOverlay && !useNavigationRail) {
                     Column {
                         MiniPlayerBar(
                             playbackState = playbackState,
@@ -196,7 +200,7 @@ fun SonoraNavHost(
             }
         ) { innerPadding ->
             Row(modifier = Modifier.fillMaxSize()) {
-                if (!isNowPlayingScreen && useNavigationRail) {
+                if (!isFullScreenOverlay && useNavigationRail) {
                     NavigationRail(
                         containerColor = MaterialTheme.colorScheme.surface,
                         modifier = Modifier
@@ -232,7 +236,7 @@ fun SonoraNavHost(
                         .weight(1f)
                         .fillMaxSize()
                 ) {
-                    AnimatedVisibility(visible = !playerUiState.isOnline && !isNowPlayingScreen) {
+                    AnimatedVisibility(visible = !playerUiState.isOnline && !isFullScreenOverlay) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -271,7 +275,7 @@ fun SonoraNavHost(
                         }
 
                         val navModifier = when {
-                            isNowPlayingScreen -> Modifier.fillMaxSize()
+                            isFullScreenOverlay -> Modifier.fillMaxSize()
                             !playerUiState.isOnline -> Modifier.fillMaxSize()
                             else -> Modifier
                                 .fillMaxSize()
@@ -303,6 +307,9 @@ fun SonoraNavHost(
                                     onOpenPlaylist = { playlistId ->
                                         navController.navigate(SonoraRoute.PlaylistDetail(playlistId))
                                     },
+                                    onOpenYouTubeLogin = {
+                                        navController.navigate(SonoraRoute.YouTubeLogin(resetSession = false))
+                                    },
                                     bottomContentPadding = contentPadding,
                                     onShowMessage = ::showMessage
                                 )
@@ -310,6 +317,9 @@ fun SonoraNavHost(
 
                             composable<SonoraRoute.Settings> {
                                 SettingsScreen(
+                                    onOpenYouTubeLogin = { resetSession ->
+                                        navController.navigate(SonoraRoute.YouTubeLogin(resetSession = resetSession))
+                                    },
                                     bottomContentPadding = contentPadding,
                                     onShowMessage = ::showMessage
                                 )
@@ -328,9 +338,22 @@ fun SonoraNavHost(
                                     onBack = { navController.popBackStack() }
                                 )
                             }
+
+                            composable<SonoraRoute.YouTubeLogin> { entry ->
+                                val route = entry.toRoute<SonoraRoute.YouTubeLogin>()
+                                YouTubeLoginScreen(
+                                    resetSession = route.resetSession,
+                                    onBack = { navController.popBackStack() },
+                                    onLoginSuccess = { message ->
+                                        showMessage(message)
+                                        navController.popBackStack()
+                                    },
+                                    onShowMessage = ::showMessage
+                                )
+                            }
                         }
 
-                        if (!isNowPlayingScreen && useNavigationRail) {
+                        if (!isFullScreenOverlay && useNavigationRail) {
                             MiniPlayerBar(
                                 playbackState = playbackState,
                                 progressFlow = playerViewModel.playbackProgress,

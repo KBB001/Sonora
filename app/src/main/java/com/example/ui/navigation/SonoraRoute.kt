@@ -20,4 +20,7 @@ sealed interface SonoraRoute {
 
     @Serializable
     data object NowPlaying : SonoraRoute
+
+    @Serializable
+    data class YouTubeLogin(val resetSession: Boolean = false) : SonoraRoute
 }

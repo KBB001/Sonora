@@ -65,6 +65,8 @@ import com.example.domain.model.AppThemeMode
 import com.example.domain.model.AppUpdateUiState
 import com.example.domain.model.AudioQuality
 import com.example.playback.EqualizerState
+import com.example.ui.account.YouTubeAccountSettingsCard
+import com.example.ui.account.YouTubeAccountViewModel
 import com.example.ui.components.SonoraIcons
 import kotlinx.coroutines.launch
 import java.io.File
@@ -73,11 +75,14 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(
+    onOpenYouTubeLogin: (resetSession: Boolean) -> Unit,
     bottomContentPadding: PaddingValues,
     onShowMessage: (String) -> Unit,
-    viewModel: SettingsViewModel = hiltViewModel()
+    viewModel: SettingsViewModel = hiltViewModel(),
+    accountViewModel: YouTubeAccountViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val accountUiState by accountViewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var showEqualizerSheet by remember { mutableStateOf(false) }
@@ -311,6 +316,30 @@ fun SettingsScreen(
                 text = "Settings",
                 style = MaterialTheme.typography.headlineMedium,
                 color = MaterialTheme.colorScheme.onBackground
+            )
+        }
+
+        // YouTube Account & Unification
+        item {
+            YouTubeAccountSettingsCard(
+                uiState = accountUiState,
+                onOpenLogin = onOpenYouTubeLogin,
+                onSwitchAccount = { id -> accountViewModel.switchActiveAccount(id, onShowMessage) },
+                onRemoveAccount = { id -> accountViewModel.removeAccount(id, onShowMessage) },
+                onToggleAutoSync = accountViewModel::setAutoSyncEnabled,
+                onSyncNow = { accountViewModel.syncAndMergeActiveAccount(onShowMessage) },
+                onUnifyAllAccounts = { accountViewModel.unifyAllAccountsIntoActive(onShowMessage) },
+                onImportCookies = { cookies, onDone ->
+                    accountViewModel.signInWithSession(
+                        cookieHeader = cookies,
+                        onSuccess = { acc ->
+                            onDone()
+                            onShowMessage("Подключён аккаунт: ${acc.name}")
+                        },
+                        onError = onShowMessage
+                    )
+                },
+                onSignOutAll = { accountViewModel.signOutAll(onShowMessage) }
             )
         }
 

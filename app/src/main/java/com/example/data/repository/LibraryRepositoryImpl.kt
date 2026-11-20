@@ -34,7 +34,8 @@ class LibraryRepositoryImpl @Inject constructor(
     private val historyDao: HistoryDao,
     private val playlistDao: PlaylistDao,
     private val downloadedTrackDao: DownloadedTrackDao,
-    private val searchHistoryDao: SearchHistoryDao
+    private val searchHistoryDao: SearchHistoryDao,
+    private val writeThroughSync: YouTubeWriteThroughSync? = null
 ) : LibraryRepository {
 
     private val jsonCodec = Json {
@@ -124,9 +125,11 @@ class LibraryRepositoryImpl @Inject constructor(
         val currentlyFavorite = favoriteDao.isFavorite(track.id)
         return if (currentlyFavorite) {
             favoriteDao.deleteFavorite(track.id)
+            writeThroughSync?.onFavoriteChanged(track.id, isFavorite = false)
             false
         } else {
             favoriteDao.insertFavorite(FavoriteTrackEntity.fromDomain(track))
+            writeThroughSync?.onFavoriteChanged(track.id, isFavorite = true)
             true
         }
     }
@@ -142,14 +145,18 @@ class LibraryRepositoryImpl @Inject constructor(
     override suspend fun createPlaylist(
         name: String,
         description: String,
-        initialTracks: List<Track>
+        initialTracks: List<Track>,
+        youtubePlaylistId: String?
     ): Long {
         val coverUrl = initialTracks.firstOrNull()?.thumbnailUrl
+        val cleanName = name.trim().ifBlank { "Untitled Playlist" }
+        val cleanDesc = description.trim()
         val playlistId = playlistDao.insertPlaylist(
             PlaylistEntity(
-                name = name.trim().ifBlank { "Untitled Playlist" },
-                description = description.trim(),
-                coverUrl = coverUrl
+                name = cleanName,
+                description = cleanDesc,
+                coverUrl = coverUrl,
+                youtubePlaylistId = youtubePlaylistId
             )
         )
         if (initialTracks.isNotEmpty()) {
@@ -167,6 +174,9 @@ class LibraryRepositoryImpl @Inject constructor(
             }
             playlistDao.insertPlaylistTracks(trackEntities)
         }
+        if (youtubePlaylistId.isNullOrBlank()) {
+            writeThroughSync?.onPlaylistCreated(playlistId, cleanName, cleanDesc, initialTracks)
+        }
         return playlistId
     }
 
@@ -176,11 +186,95 @@ class LibraryRepositoryImpl @Inject constructor(
 
     override suspend fun addTrackToPlaylist(playlistId: Long, track: Track) {
         playlistDao.insertPlaylistTrack(PlaylistTrackEntity.fromDomain(playlistId, track))
+        writeThroughSync?.onTrackAddedToPlaylist(playlistId, track)
     }
 
     override suspend fun removeTrackFromPlaylist(playlistId: Long, trackId: String) {
         playlistDao.deleteTrackFromPlaylist(playlistId, trackId)
+        writeThroughSync?.onTrackRemovedFromPlaylist(playlistId, trackId)
     }
+
+    override suspend fun mergeFavoriteTracks(tracks: List<Track>): Int = withContext(Dispatchers.IO) {
+        if (tracks.isEmpty()) return@withContext 0
+        val existingIds = favoriteDao.observeFavoriteIds().first().toSet()
+        var addedCount = 0
+        tracks.reversed().forEach { track ->
+            if (track.id !in existingIds) {
+                favoriteDao.insertFavorite(FavoriteTrackEntity.fromDomain(track))
+                addedCount++
+            }
+        }
+        addedCount
+    }
+
+    override suspend fun mergeHistoryTracks(tracks: List<Track>): Int = withContext(Dispatchers.IO) {
+        if (tracks.isEmpty()) return@withContext 0
+        val existingIds = historyDao.observeHistory().first().map { it.id }.toSet()
+        var addedCount = 0
+        tracks.reversed().forEach { track ->
+            if (track.id !in existingIds) {
+                historyDao.upsertHistory(HistoryTrackEntity.fromDomain(track))
+                addedCount++
+            }
+        }
+        addedCount
+    }
+
+    override suspend fun mergePlaylist(
+        name: String,
+        description: String,
+        youtubePlaylistId: String?,
+        tracks: List<Track>
+    ): Pair<Long, Int> = withContext(Dispatchers.IO) {
+        val existingByRemote = youtubePlaylistId?.takeIf { it.isNotBlank() }?.let {
+            playlistDao.findByYoutubePlaylistId(it)
+        }
+        val existing = existingByRemote ?: playlistDao.findByNameIgnoreCase(name)
+
+        if (existing == null) {
+            val newId = createPlaylist(
+                name = name,
+                description = description,
+                initialTracks = tracks,
+                youtubePlaylistId = youtubePlaylistId
+            )
+            return@withContext newId to tracks.size
+        }
+
+        if (!youtubePlaylistId.isNullOrBlank() && existing.youtubePlaylistId.isNullOrBlank()) {
+            playlistDao.updateYoutubePlaylistId(existing.id, youtubePlaylistId)
+        }
+
+        val existingTrackIds = playlistDao.getPlaylistTrackIds(existing.id).toSet()
+        val missingTracks = tracks.filter { it.id !in existingTrackIds }
+        if (missingTracks.isNotEmpty()) {
+            val baseTime = System.currentTimeMillis()
+            val entities = missingTracks.mapIndexed { index, track ->
+                PlaylistTrackEntity(
+                    playlistId = existing.id,
+                    trackId = track.id,
+                    title = track.title,
+                    artist = track.artist,
+                    durationSeconds = track.durationSeconds,
+                    thumbnailUrl = track.thumbnailUrl,
+                    addedAt = baseTime + index
+                )
+            }
+            playlistDao.insertPlaylistTracks(entities)
+        }
+        existing.id to missingTracks.size
+    }
+
+    override suspend fun updatePlaylistYoutubeId(playlistId: Long, youtubePlaylistId: String) {
+        playlistDao.updateYoutubePlaylistId(playlistId, youtubePlaylistId)
+    }
+
+    override suspend fun getAllPlaylistsWithTracks(): List<Pair<Playlist, List<Track>>> =
+        withContext(Dispatchers.IO) {
+            observePlaylists().first().map { playlist ->
+                playlist to observePlaylistTracks(playlist.id).first()
+            }
+        }
 
     override suspend fun exportBackupJson(): String = withContext(Dispatchers.IO) {
         val favorites = observeFavorites().first()
@@ -230,6 +324,7 @@ class LibraryRepositoryImpl @Inject constructor(
         description = description,
         coverUrl = coverUrl,
         trackCount = trackCount,
-        createdAt = createdAt
+        createdAt = createdAt,
+        youtubePlaylistId = youtubePlaylistId
     )
 }

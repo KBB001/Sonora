@@ -2,6 +2,8 @@ package com.example.di
 
 import android.content.Context
 import androidx.room.Room
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.local.SonoraDatabase
 import com.example.data.local.dao.DownloadedTrackDao
 import com.example.data.local.dao.FavoriteDao
@@ -19,6 +21,12 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object DatabaseModule {
 
+    private val MIGRATION_2_3 = object : Migration(2, 3) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE playlists ADD COLUMN youtubePlaylistId TEXT DEFAULT NULL")
+        }
+    }
+
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): SonoraDatabase =
@@ -26,7 +34,10 @@ object DatabaseModule {
             context,
             SonoraDatabase::class.java,
             "sonora_music.db"
-        ).fallbackToDestructiveMigration(dropAllTables = true).build()
+        )
+            .addMigrations(MIGRATION_2_3)
+            .fallbackToDestructiveMigration(dropAllTables = true)
+            .build()
 
     @Provides
     fun provideFavoriteDao(database: SonoraDatabase): FavoriteDao = database.favoriteDao()

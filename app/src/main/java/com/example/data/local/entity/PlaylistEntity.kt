@@ -9,5 +9,6 @@ data class PlaylistEntity(
     val name: String,
     val description: String = "",
     val coverUrl: String? = null,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val youtubePlaylistId: String? = null
 )

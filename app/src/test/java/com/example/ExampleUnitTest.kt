@@ -2,6 +2,7 @@ package com.example
 
 import com.example.core.common.DurationFormatter
 import com.example.core.common.SemverComparator
+import com.example.data.remote.YouTubeMusicAccountApi
 import com.example.data.remote.YouTubeRepositoryImpl
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -41,5 +42,30 @@ class ExampleUnitTest {
 
         val playlistResult = repo.getPlaylistTracks("")
         assertTrue(playlistResult.isFailure)
+    }
+
+    @Test
+    fun youtubeAccountApi_validatesCookiesAndBuildsSapisidHash() {
+        val validCookies = "SID=abc123; SAPISID=xyz789/hash; HSID=def456"
+        assertTrue(YouTubeMusicAccountApi.hasAuthCookies(validCookies))
+        assertEquals("xyz789/hash", YouTubeMusicAccountApi.extractSapisid(validCookies))
+
+        val authHeader = YouTubeMusicAccountApi.buildSapisidHashHeader(
+            sapisid = "xyz789/hash",
+            origin = YouTubeMusicAccountApi.YOUTUBE_MUSIC_ORIGIN,
+            timestampSeconds = 1700000000L
+        )
+        assertTrue(authHeader.startsWith("SAPISIDHASH 1700000000_"))
+        assertEquals(40, authHeader.substringAfter('_').length)
+
+        val netscapeCookies = """
+            # Netscape HTTP Cookie File
+            .youtube.com	TRUE	/	TRUE	1800000000	__Secure-3PAPISID	sapi_val
+            .youtube.com	TRUE	/	TRUE	1800000000	__Secure-3PSID	sid_val
+        """.trimIndent()
+        val normalized = YouTubeMusicAccountApi.normalizeCookieHeader(netscapeCookies)
+        assertTrue(YouTubeMusicAccountApi.hasAuthCookies(normalized))
+        assertEquals("sapi_val", YouTubeMusicAccountApi.extractSapisid(normalized))
+        assertFalse(YouTubeMusicAccountApi.hasAuthCookies("VISITOR_INFO1_LIVE=only_guest"))
     }
 }

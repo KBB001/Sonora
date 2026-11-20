@@ -3,8 +3,10 @@ package com.example.di
 import com.example.data.remote.YouTubeRepositoryImpl
 import com.example.data.repository.LibraryRepositoryImpl
 import com.example.data.repository.SettingsRepositoryImpl
+import com.example.data.repository.YouTubeAccountRepositoryImpl
 import com.example.domain.repository.LibraryRepository
 import com.example.domain.repository.SettingsRepository
+import com.example.domain.repository.YouTubeAccountRepository
 import com.example.domain.repository.YouTubeRepository
 import dagger.Binds
 import dagger.Module
@@ -27,4 +29,10 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindSettingsRepository(impl: SettingsRepositoryImpl): SettingsRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindYouTubeAccountRepository(
+        impl: YouTubeAccountRepositoryImpl
+    ): YouTubeAccountRepository
 }

@@ -26,10 +26,26 @@ interface LibraryRepository {
     suspend fun toggleFavorite(track: Track): Boolean
     suspend fun recordPlayback(track: Track)
     suspend fun clearHistory()
-    suspend fun createPlaylist(name: String, description: String = "", initialTracks: List<Track> = emptyList()): Long
+    suspend fun createPlaylist(
+        name: String,
+        description: String = "",
+        initialTracks: List<Track> = emptyList(),
+        youtubePlaylistId: String? = null
+    ): Long
     suspend fun deletePlaylist(playlistId: Long)
     suspend fun addTrackToPlaylist(playlistId: Long, track: Track)
     suspend fun removeTrackFromPlaylist(playlistId: Long, trackId: String)
+
+    suspend fun mergeFavoriteTracks(tracks: List<Track>): Int
+    suspend fun mergeHistoryTracks(tracks: List<Track>): Int
+    suspend fun mergePlaylist(
+        name: String,
+        description: String = "",
+        youtubePlaylistId: String? = null,
+        tracks: List<Track>
+    ): Pair<Long, Int>
+    suspend fun updatePlaylistYoutubeId(playlistId: Long, youtubePlaylistId: String)
+    suspend fun getAllPlaylistsWithTracks(): List<Pair<Playlist, List<Track>>>
 
     suspend fun exportBackupJson(): String
     suspend fun importBackupJson(json: String): Result<Int>
