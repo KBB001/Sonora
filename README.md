@@ -26,6 +26,8 @@
 
 ## Локальная сборка
 
+> Требования: **JDK 21** (необходим для Robolectric 4.16+ с Android SDK 36) и **Gradle 9.3.1** (или Android Studio Otter+).
+
 1. Клонируйте репозиторий:
    ```bash
    git clone https://github.com/<OWNER>/<REPO>.git

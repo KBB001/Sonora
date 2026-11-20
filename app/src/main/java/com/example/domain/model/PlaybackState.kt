@@ -1,11 +1,20 @@
 package com.example.domain.model
 
+import androidx.compose.runtime.Immutable
+
 enum class RepeatMode {
     OFF,
     ALL,
     ONE
 }
 
+@Immutable
+data class PlaybackProgress(
+    val positionMs: Long = 0L,
+    val durationMs: Long = 0L
+)
+
+@Immutable
 data class PlaybackState(
     val currentTrack: Track? = null,
     val queue: List<Track> = emptyList(),

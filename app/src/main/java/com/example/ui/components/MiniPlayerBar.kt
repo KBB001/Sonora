@@ -29,21 +29,29 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.R
+import com.example.domain.model.PlaybackProgress
 import com.example.domain.model.PlaybackState
+import kotlinx.coroutines.flow.StateFlow
 
 @Composable
 fun MiniPlayerBar(
     playbackState: PlaybackState,
+    progressFlow: StateFlow<PlaybackProgress>,
     onOpenNowPlaying: () -> Unit,
     onTogglePlayPause: () -> Unit,
     onSkipNext: () -> Unit,
@@ -58,10 +66,13 @@ fun MiniPlayerBar(
         modifier = modifier
     ) {
         if (track != null) {
-            val progress = if (playbackState.durationMs > 0L) {
-                (playbackState.positionMs.toFloat() / playbackState.durationMs.toFloat()).coerceIn(0f, 1f)
-            } else {
-                0f
+            val context = LocalContext.current
+            val imageRequest = remember(track.thumbnailUrl) {
+                ImageRequest.Builder(context)
+                    .data(track.thumbnailUrl)
+                    .size(132)
+                    .crossfade(true)
+                    .build()
             }
 
             Surface(
@@ -83,7 +94,7 @@ fun MiniPlayerBar(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         AsyncImage(
-                            model = track.thumbnailUrl,
+                            model = imageRequest,
                             contentDescription = "${track.title} artwork",
                             placeholder = painterResource(R.drawable.img_default_cover),
                             error = painterResource(R.drawable.img_default_cover),
@@ -168,16 +179,27 @@ fun MiniPlayerBar(
                         }
                     }
 
-                    LinearProgressIndicator(
-                        progress = { progress },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(2.5.dp),
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
-                    )
+                    MiniPlayerProgressIndicator(progressFlow = progressFlow)
                 }
             }
         }
     }
+}
+
+@Composable
+private fun MiniPlayerProgressIndicator(progressFlow: StateFlow<PlaybackProgress>) {
+    val progressState by progressFlow.collectAsStateWithLifecycle()
+    val progress = if (progressState.durationMs > 0L) {
+        (progressState.positionMs.toFloat() / progressState.durationMs.toFloat()).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+    LinearProgressIndicator(
+        progress = { progress },
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(2.5.dp),
+        color = MaterialTheme.colorScheme.primary,
+        trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
+    )
 }

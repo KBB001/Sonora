@@ -1,11 +1,13 @@
 package com.example.data.remote
 
+import com.example.core.common.NetworkMonitor
 import com.example.domain.model.AudioQuality
 import com.example.domain.model.Track
 import com.example.domain.model.YouTubeArtistSummary
 import com.example.domain.model.YouTubePlaylistSummary
 import com.example.domain.repository.YouTubeRepository
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -28,28 +30,51 @@ import org.schabi.newpipe.extractor.stream.DeliveryMethod
 import org.schabi.newpipe.extractor.stream.StreamInfo
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import org.schabi.newpipe.extractor.stream.StreamType
+import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class YouTubeRepositoryImpl @Inject constructor(
-    private val okHttpClient: OkHttpClient
+    private val okHttpClient: OkHttpClient,
+    private val networkMonitor: NetworkMonitor? = null
 ) : YouTubeRepository {
 
     private val youtubeService = ServiceList.YouTube
     private val fallbackHttpClient by lazy {
         okHttpClient.newBuilder()
-            .connectTimeout(8, TimeUnit.SECONDS)
+            .connectTimeout(6, TimeUnit.SECONDS)
             .readTimeout(8, TimeUnit.SECONDS)
+            .callTimeout(12, TimeUnit.SECONDS)
             .build()
     }
+
+    private val searchTracksCache = TtlLruCache<String, List<Track>>(maxEntries = 30, ttlMs = SEARCH_CACHE_TTL_MS)
+    private val searchPlaylistsCache = TtlLruCache<String, List<YouTubePlaylistSummary>>(maxEntries = 20, ttlMs = SEARCH_CACHE_TTL_MS)
+    private val searchArtistsCache = TtlLruCache<String, List<YouTubeArtistSummary>>(maxEntries = 20, ttlMs = SEARCH_CACHE_TTL_MS)
+    private val suggestionsCache = TtlLruCache<String, List<String>>(maxEntries = 60, ttlMs = SUGGESTIONS_CACHE_TTL_MS)
+    private val playlistCache = TtlLruCache<String, Pair<String, List<Track>>>(maxEntries = 20, ttlMs = SEARCH_CACHE_TTL_MS)
+    private val artistTracksCache = TtlLruCache<String, List<Track>>(maxEntries = 20, ttlMs = SEARCH_CACHE_TTL_MS)
+    private val relatedTracksCache = TtlLruCache<String, List<Track>>(maxEntries = 32, ttlMs = RELATED_CACHE_TTL_MS)
+    private val streamUrlCache = TtlLruCache<String, String>(maxEntries = 64, ttlMs = STREAM_URL_TTL_MS)
+    private val inFlightStreams = ConcurrentHashMap<String, CompletableDeferred<Result<String>>>()
+
+    private fun isOffline(): Boolean = networkMonitor?.isOnline?.value == false
 
     override suspend fun searchTracks(query: String): Result<List<Track>> =
         withContext(Dispatchers.IO) {
             val trimmed = query.trim()
             if (trimmed.isEmpty()) {
                 return@withContext Result.success(emptyList())
+            }
+            val cacheKey = trimmed.lowercase()
+            searchTracksCache.get(cacheKey)?.let { cached ->
+                return@withContext Result.success(cached)
+            }
+            if (isOffline()) {
+                return@withContext Result.failure(IOException("Нет подключения к интернету"))
             }
             try {
                 val queryHandler = youtubeService.searchQHFactory.fromQuery(trimmed)
@@ -61,6 +86,8 @@ class YouTubeRepositoryImpl @Inject constructor(
                             it.streamType == StreamType.AUDIO_STREAM
                     }
                     .mapNotNull { it.toTrackOrNull() }
+                    .distinctBy { it.id }
+                searchTracksCache.put(cacheKey, tracks)
                 Result.success(tracks)
             } catch (e: CancellationException) {
                 throw e
@@ -73,6 +100,13 @@ class YouTubeRepositoryImpl @Inject constructor(
         withContext(Dispatchers.IO) {
             val trimmed = query.trim()
             if (trimmed.isEmpty()) return@withContext Result.success(emptyList())
+            val cacheKey = trimmed.lowercase()
+            searchPlaylistsCache.get(cacheKey)?.let { cached ->
+                return@withContext Result.success(cached)
+            }
+            if (isOffline()) {
+                return@withContext Result.failure(IOException("Нет подключения к интернету"))
+            }
             try {
                 val queryHandler = youtubeService.searchQHFactory.fromQuery(
                     trimmed,
@@ -94,6 +128,8 @@ class YouTubeRepositoryImpl @Inject constructor(
                         )
                     }
                     .filter { it.url.isNotBlank() }
+                    .distinctBy { it.url }
+                searchPlaylistsCache.put(cacheKey, playlists)
                 Result.success(playlists)
             } catch (e: CancellationException) {
                 throw e
@@ -106,6 +142,13 @@ class YouTubeRepositoryImpl @Inject constructor(
         withContext(Dispatchers.IO) {
             val trimmed = query.trim()
             if (trimmed.isEmpty()) return@withContext Result.success(emptyList())
+            val cacheKey = trimmed.lowercase()
+            searchArtistsCache.get(cacheKey)?.let { cached ->
+                return@withContext Result.success(cached)
+            }
+            if (isOffline()) {
+                return@withContext Result.failure(IOException("Нет подключения к интернету"))
+            }
             try {
                 val queryHandler = youtubeService.searchQHFactory.fromQuery(
                     trimmed,
@@ -126,6 +169,8 @@ class YouTubeRepositoryImpl @Inject constructor(
                         )
                     }
                     .filter { it.url.isNotBlank() }
+                    .distinctBy { it.url }
+                searchArtistsCache.put(cacheKey, artists)
                 Result.success(artists)
             } catch (e: CancellationException) {
                 throw e
@@ -136,14 +181,24 @@ class YouTubeRepositoryImpl @Inject constructor(
 
     override suspend fun getArtistTracks(channelUrl: String): Result<List<Track>> =
         withContext(Dispatchers.IO) {
+            val trimmed = channelUrl.trim()
+            if (trimmed.isEmpty()) return@withContext Result.success(emptyList())
+            artistTracksCache.get(trimmed)?.let { cached ->
+                return@withContext Result.success(cached)
+            }
+            if (isOffline()) {
+                return@withContext Result.failure(IOException("Нет подключения к интернету"))
+            }
             try {
-                val channelInfo = ChannelInfo.getInfo(youtubeService, channelUrl)
+                val channelInfo = ChannelInfo.getInfo(youtubeService, trimmed)
                 val videoTab = channelInfo.tabs.firstOrNull()
                     ?: return@withContext Result.success(emptyList())
                 val tabInfo = ChannelTabInfo.getInfo(youtubeService, videoTab)
                 val tracks = tabInfo.relatedItems
                     .filterIsInstance<StreamInfoItem>()
                     .mapNotNull { it.toTrackOrNull() }
+                    .distinctBy { it.id }
+                artistTracksCache.put(trimmed, tracks)
                 Result.success(tracks)
             } catch (e: CancellationException) {
                 throw e
@@ -156,69 +211,134 @@ class YouTubeRepositoryImpl @Inject constructor(
         withContext(Dispatchers.IO) {
             val trimmed = query.trim()
             if (trimmed.length < 2) return@withContext emptyList()
+            val cacheKey = trimmed.lowercase()
+            suggestionsCache.get(cacheKey)?.let { return@withContext it }
+            if (isOffline()) return@withContext emptyList()
             runCatching {
-                youtubeService.suggestionExtractor.suggestionList(trimmed).orEmpty().take(8)
+                youtubeService.suggestionExtractor
+                    .suggestionList(trimmed)
+                    .orEmpty()
+                    .distinct()
+                    .take(8)
+                    .also { list ->
+                        if (list.isNotEmpty()) suggestionsCache.put(cacheKey, list)
+                    }
             }.getOrDefault(emptyList())
         }
 
     override suspend fun getAudioStreamUrl(
         videoId: String,
         audioQuality: AudioQuality
-    ): Result<String> =
-        withContext(Dispatchers.IO) {
-            val cleanId = extractVideoId(videoId)
-            if (cleanId.isBlank()) {
-                return@withContext Result.failure(IllegalArgumentException("Invalid YouTube video ID"))
-            }
-
-            var primaryError: Exception? = null
-
-            // 1. Primary: NewPipeExtractor direct extraction
-            try {
-                val watchUrl = "https://www.youtube.com/watch?v=$cleanId"
-                val streamInfo = StreamInfo.getInfo(youtubeService, watchUrl)
-                val bestAudioStream = selectBestAudioStream(streamInfo.audioStreams, audioQuality)
-                if (bestAudioStream != null) {
-                    return@withContext Result.success(bestAudioStream.content)
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                primaryError = e
-            }
-
-            // 2. Fallback: Direct InnerTube alternative client profiles
-            fetchViaInnerTubeClients(cleanId, audioQuality)?.let { url ->
-                return@withContext Result.success(url)
-            }
-
-            // 3. Fallback: Public Piped / Invidious audio endpoints
-            fetchViaPipedInstances(cleanId, audioQuality)?.let { url ->
-                return@withContext Result.success(url)
-            }
-            fetchViaInvidiousInstances(cleanId, audioQuality)?.let { url ->
-                return@withContext Result.success(url)
-            }
-
-            val rawMessage = primaryError?.message.orEmpty()
-            val friendlyError = if (
-                rawMessage.contains("LOGIN_REQUIRED", ignoreCase = true) ||
-                rawMessage.contains("not a bot", ignoreCase = true)
-            ) {
-                IllegalStateException(
-                    "YouTube blocked anonymous playback from this network IP. Try switching to Wi-Fi/mobile data or play a downloaded track."
-                )
-            } else {
-                primaryError ?: IllegalStateException("No playable audio stream found for $cleanId")
-            }
-            Result.failure(friendlyError)
+    ): Result<String> = withContext(Dispatchers.IO) {
+        val cleanId = extractVideoId(videoId)
+        if (cleanId.isBlank()) {
+            return@withContext Result.failure(IllegalArgumentException("Invalid YouTube video ID"))
         }
+
+        val cacheKey = "$cleanId:${audioQuality.name}"
+        streamUrlCache.get(cacheKey)?.let { cachedUrl ->
+            return@withContext Result.success(cachedUrl)
+        }
+
+        if (isOffline()) {
+            return@withContext Result.failure(
+                IOException("Offline: download tracks to listen without internet.")
+            )
+        }
+
+        // Deduplicate concurrent stream resolutions for the same videoId + quality
+        val newDeferred = CompletableDeferred<Result<String>>()
+        val existingDeferred = inFlightStreams.putIfAbsent(cacheKey, newDeferred)
+        if (existingDeferred != null) {
+            return@withContext existingDeferred.await()
+        }
+
+        try {
+            val resolved = resolveAudioStreamInternal(cleanId, audioQuality)
+            resolved.onSuccess { url -> streamUrlCache.put(cacheKey, url) }
+            newDeferred.complete(resolved)
+            resolved
+        } catch (e: CancellationException) {
+            newDeferred.cancel(e)
+            throw e
+        } catch (e: Exception) {
+            val failure = Result.failure<String>(e)
+            newDeferred.complete(failure)
+            failure
+        } finally {
+            inFlightStreams.remove(cacheKey, newDeferred)
+        }
+    }
+
+    private fun resolveAudioStreamInternal(
+        cleanId: String,
+        audioQuality: AudioQuality
+    ): Result<String> {
+        var primaryError: Exception? = null
+
+        // 1. Primary: NewPipeExtractor direct extraction (also opportunistically caches related tracks)
+        try {
+            val watchUrl = "https://www.youtube.com/watch?v=$cleanId"
+            val streamInfo = StreamInfo.getInfo(youtubeService, watchUrl)
+            val related = streamInfo.relatedItems
+                .filterIsInstance<StreamInfoItem>()
+                .filter {
+                    it.streamType == StreamType.VIDEO_STREAM ||
+                        it.streamType == StreamType.AUDIO_STREAM
+                }
+                .mapNotNull { it.toTrackOrNull() }
+                .distinctBy { it.id }
+            if (related.isNotEmpty()) {
+                relatedTracksCache.put(cleanId, related)
+            }
+            val bestAudioStream = selectBestAudioStream(streamInfo.audioStreams, audioQuality)
+            if (bestAudioStream != null) {
+                return Result.success(bestAudioStream.content)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            primaryError = e
+        }
+
+        // 2. Fallback: Direct InnerTube alternative client profiles
+        fetchViaInnerTubeClients(cleanId, audioQuality)?.let { url ->
+            return Result.success(url)
+        }
+
+        // 3. Fallback: Public Piped / Invidious audio endpoints
+        fetchViaPipedInstances(cleanId, audioQuality)?.let { url ->
+            return Result.success(url)
+        }
+        fetchViaInvidiousInstances(cleanId, audioQuality)?.let { url ->
+            return Result.success(url)
+        }
+
+        val rawMessage = primaryError?.message.orEmpty()
+        val friendlyError = if (
+            rawMessage.contains("LOGIN_REQUIRED", ignoreCase = true) ||
+            rawMessage.contains("not a bot", ignoreCase = true)
+        ) {
+            IllegalStateException(
+                "YouTube blocked anonymous playback from this network IP. Try switching to Wi-Fi/mobile data or play a downloaded track."
+            )
+        } else {
+            primaryError ?: IllegalStateException("No playable audio stream found for $cleanId")
+        }
+        return Result.failure(friendlyError)
+    }
 
     override suspend fun getRelatedTracks(videoId: String): Result<List<Track>> =
         withContext(Dispatchers.IO) {
             val cleanId = extractVideoId(videoId)
             if (cleanId.isBlank()) {
                 return@withContext Result.failure(IllegalArgumentException("Invalid video ID"))
+            }
+            relatedTracksCache.get(cleanId)?.let { cached ->
+                return@withContext Result.success(cached)
+            }
+            if (isOffline()) {
+                return@withContext Result.failure(IOException("Offline"))
             }
             try {
                 val watchUrl = "https://www.youtube.com/watch?v=$cleanId"
@@ -230,6 +350,8 @@ class YouTubeRepositoryImpl @Inject constructor(
                             it.streamType == StreamType.AUDIO_STREAM
                     }
                     .mapNotNull { it.toTrackOrNull() }
+                    .distinctBy { it.id }
+                relatedTracksCache.put(cleanId, related)
                 Result.success(related)
             } catch (e: CancellationException) {
                 throw e
@@ -246,6 +368,12 @@ class YouTubeRepositoryImpl @Inject constructor(
             val trimmedUrl = playlistUrl.trim()
             if (trimmedUrl.isEmpty()) {
                 return@withContext Result.failure(IllegalArgumentException("Playlist URL cannot be empty"))
+            }
+            playlistCache.get(trimmedUrl)?.let { cached ->
+                return@withContext Result.success(cached)
+            }
+            if (isOffline()) {
+                return@withContext Result.failure(IOException("Нет подключения к интернету"))
             }
             try {
                 val playlistInfo = PlaylistInfo.getInfo(youtubeService, trimmedUrl)
@@ -267,7 +395,9 @@ class YouTubeRepositoryImpl @Inject constructor(
                 }
 
                 val playlistTitle = playlistInfo.name.takeIf { it.isNotBlank() } ?: "YouTube Playlist"
-                Result.success(playlistTitle to collected.distinctBy { it.id })
+                val resultPair = playlistTitle to collected.distinctBy { it.id }
+                playlistCache.put(trimmedUrl, resultPair)
+                Result.success(resultPair)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -476,17 +606,45 @@ class YouTubeRepositoryImpl @Inject constructor(
 
     private fun extractVideoId(rawUrlOrId: String): String {
         val trimmed = rawUrlOrId.trim()
-        if (trimmed.matches(Regex("^[A-Za-z0-9_-]{11}$"))) {
+        if (trimmed.matches(VIDEO_ID_REGEX)) {
             return trimmed
         }
         return runCatching {
             youtubeService.streamLHFactory.getId(trimmed)
         }.getOrNull()?.takeIf { it.isNotBlank() }
-            ?: Regex("(?:v=|youtu\\.be/|shorts/)([A-Za-z0-9_-]{11})")
+            ?: VIDEO_URL_REGEX
                 .find(trimmed)
                 ?.groupValues
                 ?.getOrNull(1)
                 .orEmpty()
+    }
+
+    private class TtlLruCache<K : Any, V : Any>(
+        private val maxEntries: Int,
+        private val ttlMs: Long
+    ) {
+        private data class Entry<V>(val value: V, val expiresAtMs: Long)
+
+        private val map = object : LinkedHashMap<K, Entry<V>>(16, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<K, Entry<V>>?): Boolean {
+                return size > maxEntries
+            }
+        }
+
+        @Synchronized
+        fun get(key: K): V? {
+            val entry = map[key] ?: return null
+            if (System.currentTimeMillis() > entry.expiresAtMs) {
+                map.remove(key)
+                return null
+            }
+            return entry.value
+        }
+
+        @Synchronized
+        fun put(key: K, value: V) {
+            map[key] = Entry(value, System.currentTimeMillis() + ttlMs)
+        }
     }
 
     private data class InnerTubeClient(
@@ -499,6 +657,12 @@ class YouTubeRepositoryImpl @Inject constructor(
 
     private companion object {
         const val MAX_PLAYLIST_PAGES = 4
+        const val SEARCH_CACHE_TTL_MS = 5L * 60L * 1000L
+        const val SUGGESTIONS_CACHE_TTL_MS = 10L * 60L * 1000L
+        const val RELATED_CACHE_TTL_MS = 15L * 60L * 1000L
+        const val STREAM_URL_TTL_MS = 2L * 60L * 60L * 1000L
+        val VIDEO_ID_REGEX = Regex("^[A-Za-z0-9_-]{11}$")
+        val VIDEO_URL_REGEX = Regex("(?:v=|youtu\\.be/|shorts/)([A-Za-z0-9_-]{11})")
         val PIPED_INSTANCES = listOf(
             "https://pipedapi.kavin.rocks",
             "https://pipedapi.adminforge.de",

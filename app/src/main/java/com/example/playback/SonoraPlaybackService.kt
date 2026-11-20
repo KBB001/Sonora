@@ -9,7 +9,9 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionParameters.AudioOffloadPreferences
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.LibraryResult
@@ -23,14 +25,16 @@ import com.example.widget.SonoraWidget
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import com.google.common.util.concurrent.SettableFuture
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -45,8 +49,12 @@ class SonoraPlaybackService : MediaLibraryService() {
     @Inject
     lateinit var libraryRepository: LibraryRepository
 
+    @Inject
+    lateinit var equalizerManager: SonoraEqualizerManager
+
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var mediaLibrarySession: MediaLibrarySession? = null
+    private var lastWidgetSnapshot: WidgetSnapshot? = null
 
     @OptIn(UnstableApi::class)
     override fun onCreate() {
@@ -61,17 +69,55 @@ class SonoraPlaybackService : MediaLibraryService() {
             audioCacheProvider.buildCacheDataSourceFactory()
         )
 
+        // Audio-tuned LoadControl: faster playback start (1.5s) and battery-friendly buffering
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                15_000, // minBufferMs
+                45_000, // maxBufferMs
+                1_500,  // bufferForPlaybackMs
+                3_000   // bufferForPlaybackAfterRebufferMs
+            )
+            .setBackBuffer(15_000, false)
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .build()
+
         val player = ExoPlayer.Builder(this)
             .setMediaSourceFactory(mediaSourceFactory)
+            .setLoadControl(loadControl)
             .setAudioAttributes(audioAttributes, true)
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
 
         serviceScope.launch {
-            settingsRepository.settings.collect { appSettings ->
-                player.skipSilenceEnabled = appSettings.skipSilenceEnabled
-            }
+            settingsRepository.settings
+                .map { it.skipSilenceEnabled }
+                .distinctUntilChanged()
+                .collect { skipSilence ->
+                    player.skipSilenceEnabled = skipSilence
+                }
+        }
+
+        // Enable DSP hardware audio offload when Equalizer is off to allow CPU sleep during playback
+        serviceScope.launch {
+            equalizerManager.state
+                .map { it.isEnabled }
+                .distinctUntilChanged()
+                .collect { eqEnabled ->
+                    val offloadPrefs = AudioOffloadPreferences.Builder()
+                        .setAudioOffloadMode(
+                            if (eqEnabled) {
+                                AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_DISABLED
+                            } else {
+                                AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_ENABLED
+                            }
+                        )
+                        .build()
+                    player.trackSelectionParameters = player.trackSelectionParameters
+                        .buildUpon()
+                        .setAudioOffloadPreferences(offloadPrefs)
+                        .build()
+                }
         }
 
         player.addListener(object : Player.Listener {
@@ -108,7 +154,11 @@ class SonoraPlaybackService : MediaLibraryService() {
         val title = metadata.title?.toString()?.takeIf { it.isNotBlank() } ?: "Sonora"
         val artist = metadata.artist?.toString()?.takeIf { it.isNotBlank() } ?: "Ready to play"
         val isPlaying = player.isPlaying
-        serviceScope.launch {
+        val snapshot = WidgetSnapshot(title = title, artist = artist, isPlaying = isPlaying)
+        if (snapshot == lastWidgetSnapshot) return
+        lastWidgetSnapshot = snapshot
+
+        serviceScope.launch(Dispatchers.IO) {
             SonoraWidget.updateAllWidgets(
                 context = this@SonoraPlaybackService,
                 title = title,
@@ -167,30 +217,33 @@ class SonoraPlaybackService : MediaLibraryService() {
             pageSize: Int,
             params: LibraryParams?
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
-            val items = when (parentId) {
-                ROOT_ID -> listOf(
+            if (parentId == ROOT_ID) {
+                val rootChildren = listOf(
                     browsableNode(NODE_DOWNLOADS, "Offline Downloads"),
                     browsableNode(NODE_FAVORITES, "Liked Songs"),
                     browsableNode(NODE_HISTORY, "Recently Played")
                 )
-
-                NODE_DOWNLOADS -> runBlocking {
-                    libraryRepository.observeDownloadedTracks().first().map { it.toMediaItem() }
-                }
-
-                NODE_FAVORITES -> runBlocking {
-                    libraryRepository.observeFavorites().first().map { it.toMediaItem() }
-                }
-
-                NODE_HISTORY -> runBlocking {
-                    libraryRepository.observeHistory().first().map { it.toMediaItem() }
-                }
-
-                else -> emptyList()
+                return Futures.immediateFuture(
+                    LibraryResult.ofItemList(ImmutableList.copyOf(rootChildren), params)
+                )
             }
-            return Futures.immediateFuture(
-                LibraryResult.ofItemList(ImmutableList.copyOf(items), params)
-            )
+
+            val future = SettableFuture.create<LibraryResult<ImmutableList<MediaItem>>>()
+            serviceScope.launch(Dispatchers.IO) {
+                runCatching {
+                    val tracks = when (parentId) {
+                        NODE_DOWNLOADS -> libraryRepository.observeDownloadedTracks().first()
+                        NODE_FAVORITES -> libraryRepository.observeFavorites().first()
+                        NODE_HISTORY -> libraryRepository.observeHistory().first()
+                        else -> emptyList()
+                    }
+                    val items = tracks.map { it.toMediaItem() }
+                    future.set(LibraryResult.ofItemList(ImmutableList.copyOf(items), params))
+                }.onFailure {
+                    future.set(LibraryResult.ofItemList(ImmutableList.of(), params))
+                }
+            }
+            return future
         }
 
         private fun browsableNode(id: String, title: String): MediaItem {
@@ -223,6 +276,12 @@ class SonoraPlaybackService : MediaLibraryService() {
                 .build()
         }
     }
+
+    private data class WidgetSnapshot(
+        val title: String,
+        val artist: String,
+        val isPlaying: Boolean
+    )
 
     private companion object {
         const val ROOT_ID = "sonora_root"

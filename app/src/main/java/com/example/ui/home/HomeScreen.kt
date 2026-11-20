@@ -117,11 +117,16 @@ fun HomeScreen(
                         color = MaterialTheme.colorScheme.onBackground,
                         modifier = Modifier.padding(horizontal = 16.dp)
                     )
+                    val recentTracks = remember(uiState.history) { uiState.history.take(10) }
                     LazyRow(
                         contentPadding = PaddingValues(horizontal = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        items(uiState.history.take(10), key = { "hist_${it.id}" }) { track ->
+                        items(
+                            items = recentTracks,
+                            key = { "hist_${it.id}" },
+                            contentType = { "recent_card" }
+                        ) { track ->
                             RecentTrackCard(
                                 track = track,
                                 isPlaying = uiState.playbackState.currentTrack?.id == track.id,
@@ -145,7 +150,11 @@ fun HomeScreen(
                     contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(uiState.moods) { mood ->
+                    items(
+                        items = uiState.moods,
+                        key = { it },
+                        contentType = { "mood_chip" }
+                    ) { mood ->
                         val selected = mood == uiState.selectedMood
                         FilterChip(
                             selected = selected,
@@ -227,7 +236,11 @@ fun HomeScreen(
             }
 
             is DiscoverUiState.Success -> {
-                items(discover.tracks, key = { "disc_${it.id}" }) { track ->
+                items(
+                    items = discover.tracks,
+                    key = { "disc_${it.id}" },
+                    contentType = { "track_row" }
+                ) { track ->
                     TrackRowItem(
                         track = track,
                         isCurrentTrack = uiState.playbackState.currentTrack?.id == track.id,

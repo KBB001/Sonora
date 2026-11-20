@@ -33,12 +33,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.R
 import com.example.core.common.DurationFormatter
 import com.example.domain.model.Track
@@ -80,6 +82,14 @@ fun TrackRowItem(
             .testTag("track_row_${track.id}"),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        val context = LocalContext.current
+        val artworkRequest = remember(track.thumbnailUrl) {
+            ImageRequest.Builder(context)
+                .data(track.thumbnailUrl)
+                .size(162)
+                .crossfade(true)
+                .build()
+        }
         Box(
             modifier = Modifier
                 .size(54.dp)
@@ -88,7 +98,7 @@ fun TrackRowItem(
             contentAlignment = Alignment.Center
         ) {
             AsyncImage(
-                model = track.thumbnailUrl,
+                model = artworkRequest,
                 contentDescription = "${track.title} artwork",
                 placeholder = painterResource(R.drawable.img_default_cover),
                 error = painterResource(R.drawable.img_default_cover),

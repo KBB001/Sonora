@@ -1,11 +1,14 @@
 package com.example.domain.model
 
+import androidx.compose.runtime.Immutable
+
 enum class SearchFilter(val label: String) {
     TRACKS("Tracks"),
     PLAYLISTS("Playlists"),
     ARTISTS("Artists")
 }
 
+@Immutable
 data class YouTubePlaylistSummary(
     val url: String,
     val name: String,
@@ -14,6 +17,7 @@ data class YouTubePlaylistSummary(
     val thumbnailUrl: String
 )
 
+@Immutable
 data class YouTubeArtistSummary(
     val url: String,
     val name: String,

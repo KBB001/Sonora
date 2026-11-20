@@ -41,6 +41,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,6 +51,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -61,12 +63,22 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.R
 import com.example.domain.model.SearchFilter
 import com.example.domain.model.Track
 import com.example.ui.components.AddToPlaylistDialog
 import com.example.ui.components.SonoraIcons
 import com.example.ui.components.TrackRowItem
+
+private val QUICK_GENRE_SUGGESTIONS = listOf(
+    "Lofi hip hop radio",
+    "Hans Zimmer soundtrack",
+    "Daft Punk",
+    "Indie acoustic",
+    "Cyberpunk synthwave",
+    "Jazz piano live"
+)
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -199,7 +211,7 @@ fun SearchScreen(
                                     keyboardController?.hide()
                                     viewModel.submitSearch(suggestion)
                                 }
-                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                                .padding(start = 14.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
@@ -216,12 +228,17 @@ fun SearchScreen(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
-                            Icon(
-                                imageVector = SonoraIcons.NorthWest,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp)
-                            )
+                            IconButton(
+                                onClick = { viewModel.fillQueryFromSuggestion(suggestion) },
+                                modifier = Modifier.minimumInteractiveComponentSize()
+                            ) {
+                                Icon(
+                                    imageVector = SonoraIcons.NorthWest,
+                                    contentDescription = "Refine query with $suggestion",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -237,11 +254,46 @@ fun SearchScreen(
                     contentPadding = PaddingValues(
                         bottom = bottomContentPadding.calculateBottomPadding() + 16.dp
                     ),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    // Instant local/offline matches from Favorites, Downloads & History
+                    if (uiState.localMatches.isNotEmpty()) {
+                        item(key = "local_matches_header", contentType = "section_header") {
+                            Text(
+                                text = "In Your Library",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        items(
+                            items = uiState.localMatches,
+                            key = { "local_${it.id}" },
+                            contentType = { "track_row" }
+                        ) { track ->
+                            TrackRowItem(
+                                track = track,
+                                isCurrentTrack = uiState.playbackState.currentTrack?.id == track.id,
+                                isFavorite = track.id in uiState.favoriteIds,
+                                isDownloaded = track.id in uiState.downloadedIds,
+                                isDownloading = track.id in uiState.downloadingIds,
+                                onPlayClick = {
+                                    keyboardController?.hide()
+                                    viewModel.playTrack(track, uiState.localMatches)
+                                },
+                                onFavoriteClick = { viewModel.toggleFavorite(track) },
+                                onPlayNextClick = {
+                                    viewModel.playNext(track)
+                                    onShowMessage("Added \"${track.title}\" to play next")
+                                },
+                                onDownloadClick = { viewModel.toggleDownload(track, onShowMessage) },
+                                onAddToPlaylistClick = { trackForPlaylistDialog = track }
+                            )
+                        }
+                    }
+
                     if (uiState.searchHistory.isNotEmpty()) {
-                        item {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        item(key = "recent_searches_card", contentType = "search_history") {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -264,7 +316,7 @@ fun SearchScreen(
                                                 keyboardController?.hide()
                                                 viewModel.submitSearch(pastQuery)
                                             }
-                                            .padding(horizontal = 8.dp, vertical = 8.dp),
+                                            .padding(horizontal = 8.dp, vertical = 6.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Icon(
@@ -277,11 +329,13 @@ fun SearchScreen(
                                         Text(
                                             text = pastQuery,
                                             style = MaterialTheme.typography.bodyLarge,
-                                            modifier = Modifier.weight(1f)
+                                            modifier = Modifier.weight(1f),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                         IconButton(
                                             onClick = { viewModel.deleteSearchQuery(pastQuery) },
-                                            modifier = Modifier.size(32.dp)
+                                            modifier = Modifier.minimumInteractiveComponentSize()
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Rounded.Close,
@@ -295,26 +349,18 @@ fun SearchScreen(
                         }
                     }
 
-                    item {
+                    item(key = "quick_genres", contentType = "quick_genres") {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             Text(
                                 text = "Quick Genres",
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
-                            val suggestions = listOf(
-                                "Lofi hip hop radio",
-                                "Hans Zimmer soundtrack",
-                                "Daft Punk",
-                                "Indie acoustic",
-                                "Cyberpunk synthwave",
-                                "Jazz piano live"
-                            )
                             FlowRow(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                suggestions.forEach { tag ->
+                                QUICK_GENRE_SUGGESTIONS.forEach { tag ->
                                     AssistChip(
                                         onClick = {
                                             keyboardController?.hide()
@@ -331,8 +377,8 @@ fun SearchScreen(
                         }
                     }
 
-                    if (uiState.searchHistory.isEmpty()) {
-                        item {
+                    if (uiState.searchHistory.isEmpty() && uiState.localMatches.isEmpty()) {
+                        item(key = "empty_search_hint", contentType = "empty_hint") {
                             Column(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -396,13 +442,25 @@ fun SearchScreen(
             }
 
             is SearchResultsState.Playlists -> {
+                val context = LocalContext.current
                 LazyColumn(
                     contentPadding = PaddingValues(
                         bottom = bottomContentPadding.calculateBottomPadding() + 16.dp
                     ),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    items(results.items, key = { it.url }) { playlist ->
+                    items(
+                        items = results.items,
+                        key = { it.url },
+                        contentType = { "playlist_row" }
+                    ) { playlist ->
+                        val imageRequest = remember(playlist.thumbnailUrl) {
+                            ImageRequest.Builder(context)
+                                .data(playlist.thumbnailUrl)
+                                .size(168)
+                                .crossfade(true)
+                                .build()
+                        }
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -415,7 +473,7 @@ fun SearchScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 AsyncImage(
-                                    model = playlist.thumbnailUrl,
+                                    model = imageRequest,
                                     contentDescription = playlist.name,
                                     placeholder = painterResource(R.drawable.img_default_cover),
                                     error = painterResource(R.drawable.img_default_cover),
@@ -447,13 +505,25 @@ fun SearchScreen(
             }
 
             is SearchResultsState.Artists -> {
+                val context = LocalContext.current
                 LazyColumn(
                     contentPadding = PaddingValues(
                         bottom = bottomContentPadding.calculateBottomPadding() + 16.dp
                     ),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    items(results.items, key = { it.url }) { artist ->
+                    items(
+                        items = results.items,
+                        key = { it.url },
+                        contentType = { "artist_row" }
+                    ) { artist ->
+                        val imageRequest = remember(artist.thumbnailUrl) {
+                            ImageRequest.Builder(context)
+                                .data(artist.thumbnailUrl)
+                                .size(168)
+                                .crossfade(true)
+                                .build()
+                        }
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -466,7 +536,7 @@ fun SearchScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 AsyncImage(
-                                    model = artist.thumbnailUrl,
+                                    model = imageRequest,
                                     contentDescription = artist.name,
                                     placeholder = painterResource(R.drawable.img_default_cover),
                                     error = painterResource(R.drawable.img_default_cover),
@@ -517,7 +587,7 @@ fun SearchScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         results.playlistTitle?.let { playlistTitle ->
-                            item {
+                            item(key = "playlist_header", contentType = "playlist_header") {
                                 Surface(
                                     shape = RoundedCornerShape(16.dp),
                                     color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
@@ -581,7 +651,11 @@ fun SearchScreen(
                             }
                         }
 
-                        items(results.items, key = { it.id }) { track ->
+                        items(
+                            items = results.items,
+                            key = { it.id },
+                            contentType = { "track_row" }
+                        ) { track ->
                             TrackRowItem(
                                 track = track,
                                 isCurrentTrack = uiState.playbackState.currentTrack?.id == track.id,

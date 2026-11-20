@@ -159,6 +159,7 @@ fun SonoraNavHost(
                     Column {
                         MiniPlayerBar(
                             playbackState = playbackState,
+                            progressFlow = playerViewModel.playbackProgress,
                             onOpenNowPlaying = { navController.navigate(SonoraRoute.NowPlaying) },
                             onTogglePlayPause = playerViewModel::togglePlayPause,
                             onSkipNext = playerViewModel::skipNext
@@ -332,6 +333,7 @@ fun SonoraNavHost(
                         if (!isNowPlayingScreen && useNavigationRail) {
                             MiniPlayerBar(
                                 playbackState = playbackState,
+                                progressFlow = playerViewModel.playbackProgress,
                                 onOpenNowPlaying = { navController.navigate(SonoraRoute.NowPlaying) },
                                 onTogglePlayPause = playerViewModel::togglePlayPause,
                                 onSkipNext = playerViewModel::skipNext,

@@ -13,6 +13,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.example.core.common.NetworkMonitor
+import com.example.domain.model.PlaybackProgress
 import com.example.domain.model.PlaybackState
 import com.example.domain.model.RepeatMode
 import com.example.domain.model.Track
@@ -51,6 +52,9 @@ class PlaybackManager @Inject constructor(
     private val _playbackState = MutableStateFlow(PlaybackState())
     val playbackState: StateFlow<PlaybackState> = _playbackState.asStateFlow()
 
+    private val _playbackProgress = MutableStateFlow(PlaybackProgress())
+    val playbackProgress: StateFlow<PlaybackProgress> = _playbackProgress.asStateFlow()
+
     private var mediaController: MediaController? = null
     private var resolveJob: Job? = null
     private var progressJob: Job? = null
@@ -65,11 +69,16 @@ class PlaybackManager @Inject constructor(
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             val isBuffering = playbackState == Player.STATE_BUFFERING
+            val controllerDur = mediaController?.duration?.takeIf { it > 0 }
             _playbackState.update { state ->
                 state.copy(
                     isBuffering = isBuffering,
-                    durationMs = mediaController?.duration?.takeIf { it > 0 } ?: state.durationMs
+                    durationMs = controllerDur ?: state.durationMs
                 )
+            }
+            if (controllerDur != null) {
+                val pos = mediaController?.currentPosition?.coerceAtLeast(0L) ?: _playbackProgress.value.positionMs
+                _playbackProgress.value = PlaybackProgress(positionMs = pos, durationMs = controllerDur)
             }
             if (playbackState == Player.STATE_READY) {
                 stalledOnNetwork = false
@@ -147,6 +156,8 @@ class PlaybackManager @Inject constructor(
         val normalizedQueue = if (queue.any { it.id == track.id }) queue else listOf(track) + queue
         val targetIndex = normalizedQueue.indexOfFirst { it.id == track.id }.coerceAtLeast(0)
 
+        val initialDur = track.durationSeconds * 1000L
+        _playbackProgress.value = PlaybackProgress(positionMs = 0L, durationMs = initialDur)
         _playbackState.update {
             it.copy(
                 currentTrack = track,
@@ -154,7 +165,7 @@ class PlaybackManager @Inject constructor(
                 currentIndex = targetIndex,
                 isLoadingStream = true,
                 positionMs = 0L,
-                durationMs = track.durationSeconds * 1000L,
+                durationMs = initialDur,
                 errorMessage = null
             )
         }
@@ -212,13 +223,15 @@ class PlaybackManager @Inject constructor(
 
         resolveJob?.cancel()
         resolveJob = scope.launch {
+            val initialDur = track.durationSeconds * 1000L
+            _playbackProgress.value = PlaybackProgress(positionMs = 0L, durationMs = initialDur)
             _playbackState.update {
                 it.copy(
                     currentTrack = track,
                     currentIndex = index,
                     isLoadingStream = true,
                     positionMs = 0L,
-                    durationMs = track.durationSeconds * 1000L,
+                    durationMs = initialDur,
                     errorMessage = null
                 )
             }
@@ -313,6 +326,8 @@ class PlaybackManager @Inject constructor(
     fun seekTo(positionMs: Long) {
         val clamped = positionMs.coerceAtLeast(0L)
         mediaController?.seekTo(clamped)
+        val dur = _playbackProgress.value.durationMs.takeIf { it > 0L } ?: _playbackState.value.durationMs
+        _playbackProgress.value = PlaybackProgress(positionMs = clamped, durationMs = dur)
         _playbackState.update { it.copy(positionMs = clamped) }
     }
 
@@ -447,11 +462,18 @@ class PlaybackManager @Inject constructor(
         progressJob?.cancel()
         progressJob = scope.launch {
             while (isActive) {
+                // Suspend with 0 CPU wakeups while UI is backgrounded or no progress observer is active
+                if (_playbackProgress.subscriptionCount.value == 0) {
+                    _playbackProgress.subscriptionCount.first { it > 0 }
+                }
                 val controller = mediaController
                 if (controller != null) {
                     val pos = controller.currentPosition.coerceAtLeast(0L)
                     val dur = controller.duration.takeIf { it > 0 } ?: _playbackState.value.durationMs
-                    _playbackState.update { it.copy(positionMs = pos, durationMs = dur) }
+                    val next = PlaybackProgress(positionMs = pos, durationMs = dur)
+                    if (_playbackProgress.value != next) {
+                        _playbackProgress.value = next
+                    }
                 }
                 delay(500L)
             }

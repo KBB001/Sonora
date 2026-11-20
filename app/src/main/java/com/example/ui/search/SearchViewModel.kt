@@ -1,5 +1,6 @@
 package com.example.ui.search
 
+import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.TrackDownloadManager
@@ -13,12 +14,21 @@ import com.example.domain.repository.LibraryRepository
 import com.example.domain.repository.YouTubeRepository
 import com.example.playback.PlaybackManager
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -32,10 +42,12 @@ sealed interface SearchResultsState {
     data class Error(val message: String) : SearchResultsState
 }
 
+@Immutable
 data class SearchUiState(
     val query: String = "",
     val selectedFilter: SearchFilter = SearchFilter.TRACKS,
     val suggestions: List<String> = emptyList(),
+    val localMatches: List<Track> = emptyList(),
     val searchHistory: List<String> = emptyList(),
     val resultsState: SearchResultsState = SearchResultsState.Idle,
     val favoriteIds: Set<String> = emptySet(),
@@ -45,6 +57,7 @@ data class SearchUiState(
     val playbackState: PlaybackState = PlaybackState()
 )
 
+@OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class SearchViewModel @Inject constructor(
     private val youTubeRepository: YouTubeRepository,
@@ -55,35 +68,100 @@ class SearchViewModel @Inject constructor(
 
     private val queryFlow = MutableStateFlow("")
     private val filterFlow = MutableStateFlow(SearchFilter.TRACKS)
-    private val suggestionsFlow = MutableStateFlow<List<String>>(emptyList())
     private val resultsFlow = MutableStateFlow<SearchResultsState>(SearchResultsState.Idle)
+    private val suppressSuggestionsFlow = MutableStateFlow(false)
     private var searchJob: Job? = null
-    private var suggestionJob: Job? = null
 
-    val uiState: StateFlow<SearchUiState> = combine(
-        queryFlow,
-        filterFlow,
-        suggestionsFlow,
-        libraryRepository.observeSearchHistory(),
-        resultsFlow,
+    private val suggestionsFlow = combine(
+        queryFlow.map { it.trim() },
+        suppressSuggestionsFlow
+    ) { trimmed, suppressed ->
+        if (suppressed || trimmed.length < 2 || isYouTubePlaylistUrl(trimmed)) "" else trimmed
+    }
+        .debounce(220L)
+        .distinctUntilChanged()
+        .flatMapLatest { target ->
+            if (target.isEmpty()) {
+                flowOf(emptyList())
+            } else {
+                flow {
+                    emit(youTubeRepository.getSearchSuggestions(target))
+                }
+            }
+        }
+
+    // Instant local matches across Favorites, Downloads, and History (0ms, works offline)
+    private val localMatchesFlow = combine(
+        queryFlow.map { it.trim().lowercase() }.distinctUntilChanged(),
+        libraryRepository.observeDownloadedTracks(),
+        libraryRepository.observeFavorites(),
+        libraryRepository.observeHistory()
+    ) { normalizedQuery, downloads, favorites, history ->
+        if (normalizedQuery.length < 2) {
+            emptyList()
+        } else {
+            val combined = (downloads + favorites + history).distinctBy { it.id }
+            combined.filter { track ->
+                track.title.contains(normalizedQuery, ignoreCase = true) ||
+                    track.artist.contains(normalizedQuery, ignoreCase = true)
+            }.take(8)
+        }
+    }.flowOn(Dispatchers.Default)
+
+    private val filteredHistoryFlow = combine(
+        queryFlow.map { it.trim() }.distinctUntilChanged(),
+        libraryRepository.observeSearchHistory()
+    ) { trimmed, history ->
+        if (trimmed.isEmpty()) {
+            history
+        } else {
+            val prefixMatches = history.filter { it.startsWith(trimmed, ignoreCase = true) }
+            val otherMatches = history.filter {
+                !it.startsWith(trimmed, ignoreCase = true) && it.contains(trimmed, ignoreCase = true)
+            }
+            (prefixMatches + otherMatches).take(6)
+        }
+    }.flowOn(Dispatchers.Default)
+
+    private val librarySignalsFlow = combine(
         libraryRepository.observeFavoriteIds(),
         libraryRepository.observeDownloadedIds(),
         trackDownloadManager.downloadingIds,
         libraryRepository.observePlaylists(),
         playbackManager.playbackState
+    ) { favoriteIds, downloadedIds, downloadingIds, playlists, playbackState ->
+        LibrarySignals(
+            favoriteIds = favoriteIds,
+            downloadedIds = downloadedIds,
+            downloadingIds = downloadingIds,
+            playlists = playlists,
+            playbackState = playbackState
+        )
+    }
+
+    val uiState: StateFlow<SearchUiState> = combine(
+        queryFlow,
+        filterFlow,
+        suggestionsFlow,
+        localMatchesFlow,
+        filteredHistoryFlow,
+        resultsFlow,
+        librarySignalsFlow
     ) { values ->
         @Suppress("UNCHECKED_CAST")
+        val signals = values[6] as LibrarySignals
         SearchUiState(
             query = values[0] as String,
             selectedFilter = values[1] as SearchFilter,
             suggestions = values[2] as List<String>,
-            searchHistory = values[3] as List<String>,
-            resultsState = values[4] as SearchResultsState,
-            favoriteIds = values[5] as Set<String>,
-            downloadedIds = values[6] as Set<String>,
-            downloadingIds = values[7] as Set<String>,
-            playlists = values[8] as List<Playlist>,
-            playbackState = values[9] as PlaybackState
+            localMatches = values[3] as List<Track>,
+            searchHistory = values[4] as List<String>,
+            resultsState = values[5] as SearchResultsState,
+            favoriteIds = signals.favoriteIds,
+            downloadedIds = signals.downloadedIds,
+            downloadingIds = signals.downloadingIds,
+            playlists = signals.playlists,
+            playbackState = signals.playbackState
         )
     }.stateIn(
         scope = viewModelScope,
@@ -92,18 +170,21 @@ class SearchViewModel @Inject constructor(
     )
 
     fun onQueryChange(newQuery: String) {
+        suppressSuggestionsFlow.value = false
         queryFlow.value = newQuery
-        suggestionJob?.cancel()
         if (newQuery.isBlank()) {
             searchJob?.cancel()
-            suggestionsFlow.value = emptyList()
             resultsFlow.value = SearchResultsState.Idle
-            return
+        } else if (resultsFlow.value !is SearchResultsState.Idle) {
+            // Return to instant local matches + suggestions when user edits the query
+            resultsFlow.value = SearchResultsState.Idle
         }
-        suggestionJob = viewModelScope.launch {
-            delay(250L)
-            suggestionsFlow.value = youTubeRepository.getSearchSuggestions(newQuery)
-        }
+    }
+
+    fun fillQueryFromSuggestion(suggestion: String) {
+        suppressSuggestionsFlow.value = false
+        queryFlow.value = "$suggestion "
+        resultsFlow.value = SearchResultsState.Idle
     }
 
     fun selectFilter(filter: SearchFilter) {
@@ -116,12 +197,12 @@ class SearchViewModel @Inject constructor(
 
     fun submitSearch(overrideQuery: String? = null) {
         val target = (overrideQuery ?: queryFlow.value).trim()
+        suppressSuggestionsFlow.value = true
         if (overrideQuery != null) {
             queryFlow.value = target
         }
         if (target.isEmpty()) return
 
-        suggestionsFlow.value = emptyList()
         searchJob?.cancel()
         searchJob = viewModelScope.launch {
             resultsFlow.value = SearchResultsState.Loading
@@ -273,4 +354,12 @@ class SearchViewModel @Inject constructor(
         return input.contains("youtube.com", ignoreCase = true) &&
             input.contains("list=", ignoreCase = true)
     }
+
+    private data class LibrarySignals(
+        val favoriteIds: Set<String>,
+        val downloadedIds: Set<String>,
+        val downloadingIds: Set<String>,
+        val playlists: List<Playlist>,
+        val playbackState: PlaybackState
+    )
 }

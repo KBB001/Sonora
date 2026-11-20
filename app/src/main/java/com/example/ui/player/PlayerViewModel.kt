@@ -1,5 +1,6 @@
 package com.example.ui.player
 
+import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.core.common.NetworkMonitor
@@ -7,6 +8,7 @@ import com.example.data.local.TrackDownloadManager
 import com.example.data.remote.LyricsRepository
 import com.example.domain.model.AppSettings
 import com.example.domain.model.LyricsResult
+import com.example.domain.model.PlaybackProgress
 import com.example.domain.model.PlaybackState
 import com.example.domain.model.Playlist
 import com.example.domain.model.Track
@@ -33,6 +35,7 @@ sealed interface LyricsUiState {
     data class Error(val message: String) : LyricsUiState
 }
 
+@Immutable
 data class PlayerUiState(
     val playbackState: PlaybackState = PlaybackState(),
     val favoriteIds: Set<String> = emptySet(),
@@ -58,6 +61,8 @@ class PlayerViewModel @Inject constructor(
 
     private val lyricsFlow = MutableStateFlow<LyricsUiState>(LyricsUiState.Idle)
     private var lyricsJob: Job? = null
+
+    val playbackProgress: StateFlow<PlaybackProgress> = playbackManager.playbackProgress
 
     val uiState: StateFlow<PlayerUiState> = combine(
         playbackManager.playbackState,

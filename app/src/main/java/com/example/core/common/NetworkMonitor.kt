@@ -22,20 +22,24 @@ class NetworkMonitor @Inject constructor(
     private val _isOnline = MutableStateFlow(checkCurrentConnectivity())
     val isOnline: StateFlow<Boolean> = _isOnline.asStateFlow()
 
+    private val _isMetered = MutableStateFlow(checkCurrentMetered())
+    val isMetered: StateFlow<Boolean> = _isMetered.asStateFlow()
+
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
-            _isOnline.value = checkCurrentConnectivity()
+            updateFromSystem()
         }
 
         override fun onLost(network: Network) {
-            _isOnline.value = checkCurrentConnectivity()
+            updateFromSystem()
         }
 
         override fun onCapabilitiesChanged(
             network: Network,
             networkCapabilities: NetworkCapabilities
         ) {
-            _isOnline.value = checkCurrentConnectivity()
+            _isOnline.value = hasValidatedInternet(networkCapabilities)
+            _isMetered.value = !networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
         }
     }
 
@@ -48,9 +52,27 @@ class NetworkMonitor @Inject constructor(
         }
     }
 
+    private fun updateFromSystem() {
+        val activeNetwork = connectivityManager.activeNetwork
+        val capabilities = activeNetwork?.let { connectivityManager.getNetworkCapabilities(it) }
+        _isOnline.value = capabilities != null && hasValidatedInternet(capabilities)
+        _isMetered.value = capabilities == null ||
+            !capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+    }
+
     private fun checkCurrentConnectivity(): Boolean {
         val activeNetwork = connectivityManager.activeNetwork ?: return false
         val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
+        return hasValidatedInternet(capabilities)
+    }
+
+    private fun checkCurrentMetered(): Boolean {
+        val activeNetwork = connectivityManager.activeNetwork ?: return true
+        val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return true
+        return !capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+    }
+
+    private fun hasValidatedInternet(capabilities: NetworkCapabilities): Boolean {
         return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
             capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
     }

@@ -1,5 +1,6 @@
 package com.example.ui.home
 
+import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.TrackDownloadManager
@@ -10,6 +11,7 @@ import com.example.domain.repository.LibraryRepository
 import com.example.domain.repository.YouTubeRepository
 import com.example.playback.PlaybackManager
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -24,6 +26,7 @@ sealed interface DiscoverUiState {
     data class Error(val message: String) : DiscoverUiState
 }
 
+@Immutable
 data class HomeUiState(
     val selectedMood: String = MOOD_CHIPS.first(),
     val moods: List<String> = MOOD_CHIPS,
@@ -58,6 +61,7 @@ class HomeViewModel @Inject constructor(
 
     private val selectedMood = MutableStateFlow(HomeUiState.MOOD_CHIPS.first())
     private val discoverState = MutableStateFlow<DiscoverUiState>(DiscoverUiState.Loading)
+    private var discoverJob: Job? = null
 
     val uiState: StateFlow<HomeUiState> = combine(
         selectedMood,
@@ -103,7 +107,8 @@ class HomeViewModel @Inject constructor(
     }
 
     private fun loadMoodTracks(mood: String) {
-        viewModelScope.launch {
+        discoverJob?.cancel()
+        discoverJob = viewModelScope.launch {
             discoverState.value = DiscoverUiState.Loading
             youTubeRepository.searchTracks("$mood music audio").fold(
                 onSuccess = { tracks ->

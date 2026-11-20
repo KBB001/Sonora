@@ -91,8 +91,10 @@ import com.example.ui.components.SonoraIcons
 import com.example.ui.components.TrackRowItem
 import com.example.ui.settings.EqualizerSheetContent
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.example.domain.model.PlaybackProgress
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -272,7 +274,7 @@ fun NowPlayingScreen(
         ) {
             LyricsSheetContent(
                 lyricsState = uiState.lyricsState,
-                positionMs = playback.positionMs,
+                progressFlow = viewModel.playbackProgress,
                 onSeekTo = viewModel::seekTo,
                 onRetry = viewModel::retryLyrics
             )
@@ -610,54 +612,11 @@ fun NowPlayingScreen(
                         }
                     }
 
-                    val totalMs = playback.durationMs.coerceAtLeast(1L)
-                    var isDragging by remember { mutableStateOf(false) }
-                    var dragValue by remember { mutableFloatStateOf(0f) }
-                    val playbackProgress = (playback.positionMs.toFloat() / totalMs.toFloat()).coerceIn(0f, 1f)
-                    val sliderValue = if (isDragging) dragValue else playbackProgress
-
-                    Column {
-                        Slider(
-                            value = sliderValue,
-                            onValueChange = {
-                                isDragging = true
-                                dragValue = it
-                            },
-                            onValueChangeFinished = {
-                                viewModel.seekTo((dragValue * totalMs).toLong())
-                                isDragging = false
-                            },
-                            colors = SliderDefaults.colors(
-                                thumbColor = MaterialTheme.colorScheme.primary,
-                                activeTrackColor = MaterialTheme.colorScheme.primary,
-                                inactiveTrackColor = MaterialTheme.colorScheme.outline
-                            ),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("player_seek_slider")
-                        )
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            val displayedPosMs = if (isDragging) {
-                                (dragValue * totalMs).toLong()
-                            } else {
-                                playback.positionMs
-                            }
-                            Text(
-                                text = DurationFormatter.formatMillis(displayedPosMs),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = DurationFormatter.formatMillis(playback.durationMs),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
+                    NowPlayingSeekBar(
+                        progressFlow = viewModel.playbackProgress,
+                        fallbackDurationMs = playback.durationMs,
+                        onSeekTo = viewModel::seekTo
+                    )
 
                     Row(
                         modifier = Modifier
@@ -774,12 +733,72 @@ fun NowPlayingScreen(
 }
 
 @Composable
+private fun NowPlayingSeekBar(
+    progressFlow: StateFlow<PlaybackProgress>,
+    fallbackDurationMs: Long,
+    onSeekTo: (Long) -> Unit
+) {
+    val progress by progressFlow.collectAsStateWithLifecycle()
+    val effectiveDurationMs = progress.durationMs.takeIf { it > 0L } ?: fallbackDurationMs
+    val totalMs = effectiveDurationMs.coerceAtLeast(1L)
+    var isDragging by remember { mutableStateOf(false) }
+    var dragValue by remember { mutableFloatStateOf(0f) }
+    val playbackFraction = (progress.positionMs.toFloat() / totalMs.toFloat()).coerceIn(0f, 1f)
+    val sliderValue = if (isDragging) dragValue else playbackFraction
+
+    Column {
+        Slider(
+            value = sliderValue,
+            onValueChange = {
+                isDragging = true
+                dragValue = it
+            },
+            onValueChangeFinished = {
+                onSeekTo((dragValue * totalMs).toLong())
+                isDragging = false
+            },
+            colors = SliderDefaults.colors(
+                thumbColor = MaterialTheme.colorScheme.primary,
+                activeTrackColor = MaterialTheme.colorScheme.primary,
+                inactiveTrackColor = MaterialTheme.colorScheme.outline
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("player_seek_slider")
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            val displayedPosMs = if (isDragging) {
+                (dragValue * totalMs).toLong()
+            } else {
+                progress.positionMs
+            }
+            Text(
+                text = DurationFormatter.formatMillis(displayedPosMs),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = DurationFormatter.formatMillis(effectiveDurationMs),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
 private fun LyricsSheetContent(
     lyricsState: LyricsUiState,
-    positionMs: Long,
+    progressFlow: StateFlow<PlaybackProgress>,
     onSeekTo: (Long) -> Unit,
     onRetry: () -> Unit
 ) {
+    val progress by progressFlow.collectAsStateWithLifecycle()
+    val positionMs = progress.positionMs
     Column(
         modifier = Modifier
             .fillMaxWidth()
