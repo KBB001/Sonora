@@ -1,5 +1,6 @@
 package com.example.data.repository
 
+import android.content.Context
 import com.example.data.local.dao.DownloadedTrackDao
 import com.example.data.local.dao.FavoriteDao
 import com.example.data.local.dao.HistoryDao
@@ -14,9 +15,11 @@ import com.example.data.local.entity.PlaylistTrackEntity
 import com.example.data.local.entity.SearchHistoryEntity
 import com.example.domain.model.BackupPlaylist
 import com.example.domain.model.LibraryBackup
+import com.example.domain.model.LibraryImportResult
 import com.example.domain.model.Playlist
 import com.example.domain.model.Track
 import com.example.domain.repository.LibraryRepository
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -35,7 +38,8 @@ class LibraryRepositoryImpl @Inject constructor(
     private val playlistDao: PlaylistDao,
     private val downloadedTrackDao: DownloadedTrackDao,
     private val searchHistoryDao: SearchHistoryDao,
-    private val writeThroughSync: YouTubeWriteThroughSync? = null
+    private val writeThroughSync: YouTubeWriteThroughSync? = null,
+    @ApplicationContext private val context: Context? = null
 ) : LibraryRepository {
 
     private val jsonCodec = Json {
@@ -63,17 +67,56 @@ class LibraryRepositoryImpl @Inject constructor(
 
     override fun observeDownloadedTracks(): Flow<List<Track>> =
         downloadedTrackDao.observeDownloads().map { list ->
-            list.filter { File(it.localFilePath).exists() }.map { it.toDomain() }
+            list.mapNotNull { entity ->
+                val resolved = resolveOfflineFile(entity.id, entity.localFilePath) ?: return@mapNotNull null
+                entity.copy(localFilePath = resolved.absolutePath).toDomain()
+            }
         }
 
     override fun observeDownloadedIds(): Flow<Set<String>> =
         downloadedTrackDao.observeDownloadedIds().map { it.toSet() }
 
     override suspend fun getDownloadedFilePath(trackId: String): String? {
-        val path = downloadedTrackDao.getFilePath(trackId) ?: return null
-        return if (File(path).exists()) path else {
+        val storedPath = downloadedTrackDao.getFilePath(trackId) ?: return null
+        val resolved = resolveOfflineFile(trackId, storedPath)
+        return if (resolved != null) {
+            val resolvedPath = resolved.absolutePath
+            if (resolvedPath != storedPath) {
+                downloadedTrackDao.updateFilePath(trackId, resolvedPath)
+            }
+            resolvedPath
+        } else {
             downloadedTrackDao.deleteDownload(trackId)
             null
+        }
+    }
+
+    private fun resolveOfflineFile(trackId: String, storedPath: String?): File? {
+        if (!storedPath.isNullOrBlank()) {
+            val direct = File(storedPath)
+            if (direct.exists() && direct.length() > 0L) {
+                return direct
+            }
+        }
+        val baseDir = context?.let { File(it.filesDir, "offline_tracks") } ?: return null
+        if (!baseDir.exists()) return null
+        val baseCanonical = runCatching { baseDir.canonicalPath + File.separator }.getOrNull() ?: return null
+
+        val safeTrackId = trackId.replace(Regex("[^A-Za-z0-9_-]"), "_")
+            .ifBlank { "track_${trackId.hashCode()}" }
+        val candidates = buildList {
+            add(File(baseDir, "$safeTrackId.m4a"))
+            if (!storedPath.isNullOrBlank()) {
+                val fileName = File(storedPath).name
+                if (fileName.isNotBlank()) add(File(baseDir, fileName))
+            }
+        }
+        return candidates.firstOrNull { candidate ->
+            runCatching {
+                candidate.canonicalPath.startsWith(baseCanonical) &&
+                    candidate.exists() &&
+                    candidate.length() > 0L
+            }.getOrDefault(false)
         }
     }
 
@@ -287,23 +330,89 @@ class LibraryRepositoryImpl @Inject constructor(
             }
         }
 
-    override suspend fun exportBackupJson(): String = withContext(Dispatchers.IO) {
-        val favorites = observeFavorites().first()
-        val history = observeHistory().first()
+    override suspend fun exportLibraryBackup(): LibraryBackup = withContext(Dispatchers.IO) {
+        val favorites = observeFavorites().first().map { it.copy(streamUrl = null) }
+        val history = observeHistory().first().map { it.copy(streamUrl = null) }
         val playlists = observePlaylists().first().map { playlist ->
-            val tracks = observePlaylistTracks(playlist.id).first()
+            val tracks = observePlaylistTracks(playlist.id).first().map { it.copy(streamUrl = null) }
             BackupPlaylist(
                 name = playlist.name,
                 description = playlist.description,
-                tracks = tracks
+                tracks = tracks,
+                youtubePlaylistId = playlist.youtubePlaylistId,
+                createdAt = playlist.createdAt
             )
         }
-        val backup = LibraryBackup(
+        val searchQueries = observeSearchHistory().first()
+        LibraryBackup(
+            version = 2,
             favorites = favorites,
             history = history,
-            playlists = playlists
+            playlists = playlists,
+            searchHistory = searchQueries
         )
-        jsonCodec.encodeToString(backup)
+    }
+
+    override suspend fun importLibraryBackup(backup: LibraryBackup): LibraryImportResult =
+        withContext(Dispatchers.IO) {
+            val validFavorites = backup.favorites
+                .filter { it.id.isNotBlank() }
+                .take(MAX_IMPORT_TRACKS)
+                .map(::sanitizeTrack)
+            val addedFavorites = mergeFavoriteTracks(validFavorites)
+
+            val validHistory = backup.history
+                .filter { it.id.isNotBlank() }
+                .take(MAX_IMPORT_TRACKS)
+                .map(::sanitizeTrack)
+            val addedHistory = mergeHistoryTracks(validHistory)
+
+            var playlistsRestored = 0
+            var addedPlaylistTracks = 0
+            backup.playlists
+                .take(MAX_IMPORT_PLAYLISTS)
+                .forEach { playlist ->
+                    val cleanName = playlist.name.trim().take(120).ifBlank { "Untitled Playlist" }
+                    val cleanDesc = playlist.description.trim().take(500)
+                    val remoteId = playlist.youtubePlaylistId?.trim()?.take(64)?.takeIf { it.isNotBlank() }
+                    val validTracks = playlist.tracks
+                        .filter { it.id.isNotBlank() }
+                        .take(MAX_IMPORT_TRACKS)
+                        .map(::sanitizeTrack)
+                    val (_, added) = mergePlaylist(
+                        name = cleanName,
+                        description = cleanDesc,
+                        youtubePlaylistId = remoteId,
+                        tracks = validTracks
+                    )
+                    playlistsRestored++
+                    addedPlaylistTracks += added
+                }
+
+            val existingQueries = observeSearchHistory().first().toSet()
+            var addedQueries = 0
+            backup.searchHistory
+                .map { it.trim().take(120) }
+                .filter { it.isNotBlank() }
+                .distinct()
+                .take(MAX_IMPORT_SEARCH_QUERIES)
+                .reversed()
+                .forEach { query ->
+                    if (query !in existingQueries) {
+                        addedQueries++
+                    }
+                    searchHistoryDao.upsertQuery(SearchHistoryEntity(query = query))
+                }
+
+            LibraryImportResult(
+                tracksRestored = addedFavorites + addedPlaylistTracks + addedHistory,
+                playlistsRestored = playlistsRestored,
+                searchQueriesRestored = addedQueries
+            )
+        }
+
+    override suspend fun exportBackupJson(): String = withContext(Dispatchers.IO) {
+        jsonCodec.encodeToString(exportLibraryBackup())
     }
 
     override suspend fun importBackupJson(json: String): Result<Int> = withContext(Dispatchers.IO) {
@@ -312,37 +421,7 @@ class LibraryRepositoryImpl @Inject constructor(
                 "Файл резервной копии пустой или слишком большой"
             }
             val backup = jsonCodec.decodeFromString<LibraryBackup>(json)
-            var restoredCount = 0
-            backup.favorites
-                .filter { it.id.isNotBlank() }
-                .take(MAX_IMPORT_TRACKS)
-                .reversed()
-                .forEach { track ->
-                    favoriteDao.insertFavorite(FavoriteTrackEntity.fromDomain(sanitizeTrack(track)))
-                    restoredCount++
-                }
-            backup.history
-                .filter { it.id.isNotBlank() }
-                .take(MAX_IMPORT_TRACKS)
-                .reversed()
-                .forEach { track ->
-                    historyDao.upsertHistory(HistoryTrackEntity.fromDomain(sanitizeTrack(track)))
-                }
-            backup.playlists
-                .take(MAX_IMPORT_PLAYLISTS)
-                .forEach { playlist ->
-                    val validTracks = playlist.tracks
-                        .filter { it.id.isNotBlank() }
-                        .take(MAX_IMPORT_TRACKS)
-                        .map(::sanitizeTrack)
-                    createPlaylist(
-                        name = playlist.name.trim().take(120).ifBlank { "Untitled Playlist" },
-                        description = playlist.description.trim().take(500),
-                        initialTracks = validTracks
-                    )
-                    restoredCount += validTracks.size
-                }
-            restoredCount
+            importLibraryBackup(backup).tracksRestored
         }
     }
 
@@ -354,13 +433,15 @@ class LibraryRepositoryImpl @Inject constructor(
         thumbnailUrl = track.thumbnailUrl
             .trim()
             .takeIf { it.startsWith("https://", ignoreCase = true) }
-            .orEmpty()
+            .orEmpty(),
+        streamUrl = null
     )
 
     private companion object {
         const val MAX_BACKUP_JSON_CHARS = 10 * 1024 * 1024
         const val MAX_IMPORT_TRACKS = 5_000
         const val MAX_IMPORT_PLAYLISTS = 200
+        const val MAX_IMPORT_SEARCH_QUERIES = 50
     }
 
     private fun PlaylistSummaryTuple.toDomain(): Playlist = Playlist(

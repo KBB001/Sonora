@@ -2,16 +2,18 @@ package com.example.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.core.common.FriendlyErrorMapper
 import com.example.data.remote.ApkDownloadEvent
 import com.example.data.remote.AppUpdateRepository
 import com.example.data.remote.UpdateCheckOutcome
+import com.example.data.repository.BackupCoordinator
+import com.example.data.repository.BackupRestoreSummary
 import com.example.domain.model.AppSettings
 import com.example.domain.model.AppThemeMode
 import com.example.domain.model.AppUpdateInfo
 import com.example.domain.model.AppUpdateUiState
 import com.example.domain.model.AudioQuality
 import com.example.domain.model.PlaybackState
-import com.example.domain.repository.LibraryRepository
 import com.example.domain.repository.SettingsRepository
 import com.example.playback.AudioCacheProvider
 import com.example.playback.EqualizerState
@@ -34,13 +36,14 @@ data class SettingsUiState(
     val playbackState: PlaybackState = PlaybackState(),
     val equalizerState: EqualizerState = EqualizerState(),
     val cacheSizeBytes: Long = 0L,
-    val updateState: AppUpdateUiState = AppUpdateUiState.Idle
+    val updateState: AppUpdateUiState = AppUpdateUiState.Idle,
+    val lastAutoBackupLocation: String? = null
 )
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
-    private val libraryRepository: LibraryRepository,
+    private val backupCoordinator: BackupCoordinator,
     private val audioCacheProvider: AudioCacheProvider,
     private val playbackManager: PlaybackManager,
     private val equalizerManager: SonoraEqualizerManager,
@@ -49,6 +52,7 @@ class SettingsViewModel @Inject constructor(
 
     private val cacheSizeFlow = MutableStateFlow(0L)
     private val updateStateFlow = MutableStateFlow<AppUpdateUiState>(AppUpdateUiState.Idle)
+    private val autoBackupLocationFlow = MutableStateFlow<String?>(null)
     private var updateDownloadJob: Job? = null
 
     val uiState: StateFlow<SettingsUiState> = combine(
@@ -56,14 +60,17 @@ class SettingsViewModel @Inject constructor(
         playbackManager.playbackState,
         equalizerManager.state,
         cacheSizeFlow,
-        updateStateFlow
-    ) { settings, playbackState, eqState, cacheBytes, updateState ->
+        updateStateFlow,
+        autoBackupLocationFlow
+    ) { values ->
+        @Suppress("UNCHECKED_CAST")
         SettingsUiState(
-            settings = settings,
-            playbackState = playbackState,
-            equalizerState = eqState,
-            cacheSizeBytes = cacheBytes,
-            updateState = updateState
+            settings = values[0] as AppSettings,
+            playbackState = values[1] as PlaybackState,
+            equalizerState = values[2] as EqualizerState,
+            cacheSizeBytes = values[3] as Long,
+            updateState = values[4] as AppUpdateUiState,
+            lastAutoBackupLocation = values[5] as String?
         )
     }.stateIn(
         scope = viewModelScope,
@@ -120,13 +127,19 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    suspend fun generateBackupJson(): String = libraryRepository.exportBackupJson()
+    suspend fun generateBackupJson(): String = backupCoordinator.exportFullBackupJson()
 
-    fun restoreBackupJson(json: String, onResult: (Result<Int>) -> Unit) {
+    fun restoreBackupJson(json: String, onResult: (Result<BackupRestoreSummary>) -> Unit) {
         viewModelScope.launch {
-            val result = libraryRepository.importBackupJson(json)
+            val result = backupCoordinator.importFullBackupJson(json)
             onResult(result)
         }
+    }
+
+    suspend fun savePreUpdateBackupSnapshot(): Result<String> {
+        val res = backupCoordinator.saveUpdateSnapshotToDownloads()
+        res.onSuccess { path -> autoBackupLocationFlow.value = path }
+        return res
     }
 
     fun checkForUpdates(onMessage: (String) -> Unit) {
@@ -168,6 +181,8 @@ class SettingsViewModel @Inject constructor(
                 downloadedBytes = 0L,
                 totalBytes = info.assetSizeBytes
             )
+            // Proactively create a full pre-update snapshot in Downloads/Sonora
+            savePreUpdateBackupSnapshot()
             try {
                 appUpdateRepository.downloadApk(info).collect { event ->
                     when (event) {
@@ -191,7 +206,7 @@ class SettingsViewModel @Inject constructor(
                 throw e
             } catch (e: Exception) {
                 updateStateFlow.value = AppUpdateUiState.Available(info)
-                onError("Ошибка загрузки обновления: ${e.localizedMessage ?: "сбой сети"}")
+                onError(FriendlyErrorMapper.map(e, "Ошибка загрузки обновления"))
             }
         }
     }

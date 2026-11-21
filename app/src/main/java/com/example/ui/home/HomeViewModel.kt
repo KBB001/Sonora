@@ -3,6 +3,7 @@ package com.example.ui.home
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.core.common.FriendlyErrorMapper
 import com.example.core.common.NetworkMonitor
 import com.example.data.local.TrackDownloadManager
 import com.example.domain.model.PlaybackState
@@ -136,6 +137,13 @@ class HomeViewModel @Inject constructor(
 
     init {
         loadMoodTracks(HomeUiState.MOOD_CHIPS.first())
+        viewModelScope.launch {
+            networkMonitor.isOnline.collect { online ->
+                if (online && discoverState.value is DiscoverUiState.Error) {
+                    retryDiscover()
+                }
+            }
+        }
     }
 
     fun selectMood(mood: String) {
@@ -158,7 +166,7 @@ class HomeViewModel @Inject constructor(
                 },
                 onFailure = { error ->
                     discoverState.value = DiscoverUiState.Error(
-                        error.localizedMessage ?: "Не удалось подключиться к YouTube."
+                        FriendlyErrorMapper.map(error, "Не удалось подключиться к YouTube.")
                     )
                 }
             )
@@ -222,7 +230,7 @@ class HomeViewModel @Inject constructor(
             result.onSuccess { added ->
                 onNotice("Радио запущено: +$added треков")
             }.onFailure { err ->
-                onNotice(err.localizedMessage ?: "Не удалось запустить радио")
+                onNotice(FriendlyErrorMapper.map(err, "Не удалось запустить радио"))
             }
         }
     }
@@ -243,7 +251,7 @@ class HomeViewModel @Inject constructor(
                 trackDownloadManager.downloadTrack(track).onSuccess {
                     onNotice("Сохранено для офлайн-прослушивания")
                 }.onFailure { err ->
-                    onNotice(err.localizedMessage ?: "Ошибка загрузки")
+                    onNotice(FriendlyErrorMapper.map(err, "Ошибка загрузки"))
                 }
             }
         }

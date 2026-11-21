@@ -12,7 +12,10 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import com.example.core.common.FriendlyErrorMapper
 import com.example.core.common.NetworkMonitor
+import com.example.data.repository.PlaybackPersistenceStore
+import com.example.domain.model.PersistedPlaybackState
 import com.example.domain.model.PlaybackProgress
 import com.example.domain.model.PlaybackState
 import com.example.domain.model.RepeatMode
@@ -29,7 +32,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -45,7 +47,8 @@ class PlaybackManager @Inject constructor(
     private val libraryRepository: LibraryRepository,
     private val settingsRepository: SettingsRepository,
     private val networkMonitor: NetworkMonitor,
-    private val equalizerManager: SonoraEqualizerManager
+    private val equalizerManager: SonoraEqualizerManager,
+    private val playbackPersistenceStore: PlaybackPersistenceStore? = null
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -56,32 +59,59 @@ class PlaybackManager @Inject constructor(
     val playbackProgress: StateFlow<PlaybackProgress> = _playbackProgress.asStateFlow()
 
     private var mediaController: MediaController? = null
+    private var isConnectingController = false
+    private var pendingMediaItem: Pair<MediaItem, Long>? = null
+    private var retriedExpiredStreamTrackId: String? = null
     private var resolveJob: Job? = null
     private var progressJob: Job? = null
     private var sleepTimerJob: Job? = null
+    private var persistJob: Job? = null
+    private var initialRestoreJob: Job? = null
     private var stalledOnNetwork = false
+    private var hasUserPlaybackStarted = false
+    private var pendingRestorePositionMs: Long = 0L
+    private var lastPersistedPositionAtMs: Long = 0L
 
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
-            _playbackState.update { it.copy(isPlaying = isPlaying) }
-            if (isPlaying) startProgressLoop() else stopProgressLoop()
+            val currentPos = mediaController?.currentPosition?.coerceAtLeast(0L)
+            _playbackState.update { state ->
+                state.copy(
+                    isPlaying = isPlaying,
+                    positionMs = currentPos ?: state.positionMs
+                )
+            }
+            if (currentPos != null) {
+                val dur = _playbackProgress.value.durationMs.takeIf { it > 0L }
+                    ?: _playbackState.value.durationMs
+                _playbackProgress.value = PlaybackProgress(positionMs = currentPos, durationMs = dur)
+            }
+            if (isPlaying) {
+                startProgressLoop()
+            } else {
+                stopProgressLoop()
+                schedulePersistPlaybackState()
+            }
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             val isBuffering = playbackState == Player.STATE_BUFFERING
             val controllerDur = mediaController?.duration?.takeIf { it > 0 }
+            val currentPos = mediaController?.currentPosition?.coerceAtLeast(0L)
             _playbackState.update { state ->
                 state.copy(
                     isBuffering = isBuffering,
-                    durationMs = controllerDur ?: state.durationMs
+                    durationMs = controllerDur ?: state.durationMs,
+                    positionMs = currentPos ?: state.positionMs
                 )
             }
             if (controllerDur != null) {
-                val pos = mediaController?.currentPosition?.coerceAtLeast(0L) ?: _playbackProgress.value.positionMs
+                val pos = currentPos ?: _playbackProgress.value.positionMs
                 _playbackProgress.value = PlaybackProgress(positionMs = pos, durationMs = controllerDur)
             }
             if (playbackState == Player.STATE_READY) {
                 stalledOnNetwork = false
+                retriedExpiredStreamTrackId = null
             }
             if (playbackState == Player.STATE_ENDED) {
                 onTrackCompleted()
@@ -98,6 +128,32 @@ class PlaybackManager @Inject constructor(
 
         override fun onPlayerError(error: PlaybackException) {
             stalledOnNetwork = !networkMonitor.isOnline.value
+            val state = _playbackState.value
+            val track = state.currentTrack
+            if (!stalledOnNetwork &&
+                track != null &&
+                track.localFilePath.isNullOrBlank() &&
+                retriedExpiredStreamTrackId != track.id &&
+                state.currentIndex in state.queue.indices
+            ) {
+                retriedExpiredStreamTrackId = track.id
+                val resumePos = (mediaController?.currentPosition ?: state.positionMs).coerceAtLeast(0L)
+                val clearedQueue = state.queue.map {
+                    if (it.id == track.id) it.copy(streamUrl = null) else it
+                }
+                _playbackState.update {
+                    it.copy(
+                        currentTrack = track.copy(streamUrl = null),
+                        queue = clearedQueue,
+                        isPlaying = false,
+                        isBuffering = false,
+                        isLoadingStream = true,
+                        errorMessage = null
+                    )
+                }
+                loadAndPlayAtIndex(state.currentIndex, resumePos, forceRefreshStream = true)
+                return
+            }
             _playbackState.update {
                 it.copy(
                     isPlaying = false,
@@ -106,7 +162,7 @@ class PlaybackManager @Inject constructor(
                     errorMessage = if (stalledOnNetwork) {
                         "Нет сети. Воспроизведение продолжится при подключении."
                     } else {
-                        error.localizedMessage ?: "Ошибка воспроизведения"
+                        FriendlyErrorMapper.map(error, "Ошибка воспроизведения")
                     }
                 )
             }
@@ -114,8 +170,60 @@ class PlaybackManager @Inject constructor(
     }
 
     init {
+        restorePersistedStateOnInit()
         connectController()
         observeNetworkRecovery()
+    }
+
+    private fun restorePersistedStateOnInit() {
+        val store = playbackPersistenceStore ?: return
+        initialRestoreJob = scope.launch {
+            val restored = store.readPlaybackState() ?: return@launch
+            if (hasUserPlaybackStarted || _playbackState.value.currentTrack != null) {
+                return@launch
+            }
+            applyRestoredStateInternal(restored)
+        }
+    }
+
+    private fun applyRestoredStateInternal(restored: PersistedPlaybackState) {
+        if (restored.queue.isEmpty() || restored.currentIndex !in restored.queue.indices) {
+            _playbackState.update {
+                it.copy(
+                    shuffleEnabled = restored.shuffleEnabled,
+                    repeatMode = restored.repeatMode,
+                    playbackSpeed = restored.playbackSpeed
+                )
+            }
+            mediaController?.setPlaybackSpeed(restored.playbackSpeed)
+            return
+        }
+        val track = restored.queue[restored.currentIndex]
+        val durationMs = (track.durationSeconds * 1000L).coerceAtLeast(0L)
+        val clampedPos = if (durationMs > 0L) {
+            restored.positionMs.coerceIn(0L, durationMs)
+        } else {
+            restored.positionMs.coerceAtLeast(0L)
+        }
+        pendingRestorePositionMs = clampedPos
+        _playbackProgress.value = PlaybackProgress(positionMs = clampedPos, durationMs = durationMs)
+        _playbackState.update {
+            it.copy(
+                currentTrack = track,
+                queue = restored.queue,
+                currentIndex = restored.currentIndex,
+                isPlaying = false,
+                isBuffering = false,
+                isLoadingStream = false,
+                positionMs = clampedPos,
+                durationMs = durationMs,
+                shuffleEnabled = restored.shuffleEnabled,
+                repeatMode = restored.repeatMode,
+                playbackSpeed = restored.playbackSpeed,
+                errorMessage = null
+            )
+        }
+        mediaController?.setPlaybackSpeed(restored.playbackSpeed)
     }
 
     private fun observeNetworkRecovery() {
@@ -124,10 +232,12 @@ class PlaybackManager @Inject constructor(
                 .collect { online ->
                     if (online && stalledOnNetwork) {
                         stalledOnNetwork = false
-                        val idx = _playbackState.value.currentIndex
-                        if (idx in _playbackState.value.queue.indices) {
+                        val state = _playbackState.value
+                        val idx = state.currentIndex
+                        if (idx in state.queue.indices) {
+                            val resumePos = (mediaController?.currentPosition ?: state.positionMs).coerceAtLeast(0L)
                             _playbackState.update { it.copy(errorMessage = null) }
-                            loadAndPlayAtIndex(idx)
+                            loadAndPlayAtIndex(idx, resumePos, forceRefreshStream = true)
                         }
                     }
                 }
@@ -135,6 +245,8 @@ class PlaybackManager @Inject constructor(
     }
 
     private fun connectController() {
+        if (mediaController != null || isConnectingController) return
+        isConnectingController = true
         val sessionToken = SessionToken(
             context,
             ComponentName(context, SonoraPlaybackService::class.java)
@@ -142,10 +254,23 @@ class PlaybackManager @Inject constructor(
         val controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
         controllerFuture.addListener(
             {
+                isConnectingController = false
                 runCatching {
                     val controller = controllerFuture.get()
                     mediaController = controller
                     controller.addListener(playerListener)
+                    controller.setPlaybackSpeed(_playbackState.value.playbackSpeed)
+                    pendingMediaItem?.let { (item, startPos) ->
+                        pendingMediaItem = null
+                        controller.volume = 1f
+                        if (startPos > 0L) {
+                            controller.setMediaItem(item, startPos)
+                        } else {
+                            controller.setMediaItem(item)
+                        }
+                        controller.prepare()
+                        controller.play()
+                    }
                 }
             },
             ContextCompat.getMainExecutor(context)
@@ -153,6 +278,10 @@ class PlaybackManager @Inject constructor(
     }
 
     fun playTrack(track: Track, queue: List<Track> = listOf(track)) {
+        hasUserPlaybackStarted = true
+        pendingRestorePositionMs = 0L
+        pendingMediaItem = null
+        retriedExpiredStreamTrackId = null
         val normalizedQueue = if (queue.any { it.id == track.id }) queue else listOf(track) + queue
         val targetIndex = normalizedQueue.indexOfFirst { it.id == track.id }.coerceAtLeast(0)
 
@@ -170,6 +299,7 @@ class PlaybackManager @Inject constructor(
             )
         }
 
+        schedulePersistPlaybackState()
         loadAndPlayAtIndex(targetIndex)
     }
 
@@ -189,6 +319,7 @@ class PlaybackManager @Inject constructor(
                 currentIndex = currentIdx
             )
         }
+        schedulePersistPlaybackState()
     }
 
     fun moveQueueItem(fromIndex: Int, toIndex: Int) {
@@ -204,6 +335,7 @@ class PlaybackManager @Inject constructor(
         _playbackState.update {
             it.copy(queue = mutable, currentIndex = newCurrentIdx)
         }
+        schedulePersistPlaybackState()
     }
 
     fun removeFromQueue(index: Int) {
@@ -215,6 +347,7 @@ class PlaybackManager @Inject constructor(
         _playbackState.update {
             it.copy(queue = mutable, currentIndex = newCurrentIdx)
         }
+        schedulePersistPlaybackState()
     }
 
     fun addTracksToQueue(tracks: List<Track>): Int {
@@ -230,6 +363,7 @@ class PlaybackManager @Inject constructor(
         _playbackState.update {
             it.copy(queue = it.queue + toAdd)
         }
+        schedulePersistPlaybackState()
         return toAdd.size
     }
 
@@ -242,6 +376,7 @@ class PlaybackManager @Inject constructor(
         _playbackState.update {
             it.copy(queue = beforeAndCurrent + upcoming)
         }
+        schedulePersistPlaybackState()
     }
 
     fun clearUpcomingQueue() {
@@ -252,6 +387,7 @@ class PlaybackManager @Inject constructor(
         _playbackState.update {
             it.copy(queue = kept)
         }
+        schedulePersistPlaybackState()
     }
 
     fun startTrackRadio(
@@ -283,6 +419,7 @@ class PlaybackManager @Inject constructor(
                                 currentIndex = curIdx
                             )
                         }
+                        schedulePersistPlaybackState()
                         onResult?.invoke(Result.success(tail.size))
                     } else {
                         playTrack(track, listOf(track) + uniqueRelated)
@@ -296,24 +433,34 @@ class PlaybackManager @Inject constructor(
         }
     }
 
-    private fun loadAndPlayAtIndex(index: Int) {
+    private fun loadAndPlayAtIndex(
+        index: Int,
+        startPositionMs: Long = 0L,
+        forceRefreshStream: Boolean = false
+    ) {
+        hasUserPlaybackStarted = true
         val queue = _playbackState.value.queue
         val track = queue.getOrNull(index) ?: return
+        if (!forceRefreshStream && retriedExpiredStreamTrackId != null && retriedExpiredStreamTrackId != track.id) {
+            retriedExpiredStreamTrackId = null
+        }
 
         resolveJob?.cancel()
         resolveJob = scope.launch {
             val initialDur = track.durationSeconds * 1000L
-            _playbackProgress.value = PlaybackProgress(positionMs = 0L, durationMs = initialDur)
+            val clampedStartPos = startPositionMs.coerceAtLeast(0L)
+            _playbackProgress.value = PlaybackProgress(positionMs = clampedStartPos, durationMs = initialDur)
             _playbackState.update {
                 it.copy(
                     currentTrack = track,
                     currentIndex = index,
                     isLoadingStream = true,
-                    positionMs = 0L,
+                    positionMs = clampedStartPos,
                     durationMs = initialDur,
                     errorMessage = null
                 )
             }
+            schedulePersistPlaybackState()
 
             // 1. Prefer offline downloaded local file if available
             val offlinePath = track.localFilePath?.takeIf { File(it).exists() }
@@ -321,11 +468,15 @@ class PlaybackManager @Inject constructor(
 
             val playableUriResult: Result<Uri> = if (!offlinePath.isNullOrBlank()) {
                 Result.success(Uri.fromFile(File(offlinePath)))
-            } else if (!track.streamUrl.isNullOrBlank()) {
+            } else if (!forceRefreshStream && !track.streamUrl.isNullOrBlank()) {
                 Result.success(Uri.parse(track.streamUrl))
             } else {
                 val quality = settingsRepository.settings.first().audioQuality
-                youTubeRepository.getAudioStreamUrl(track.id, quality).map { Uri.parse(it) }
+                youTubeRepository.getAudioStreamUrl(
+                    videoId = track.id,
+                    audioQuality = quality,
+                    forceRefresh = forceRefreshStream
+                ).map { Uri.parse(it) }
             }
 
             playableUriResult.fold(
@@ -346,24 +497,35 @@ class PlaybackManager @Inject constructor(
                         )
                     }
 
+                    val artworkUri = resolvedTrack.thumbnailUrl
+                        .takeIf { it.isNotBlank() }
+                        ?.let { Uri.parse(it) }
+                    val mediaMetadata = MediaMetadata.Builder()
+                        .setTitle(resolvedTrack.title)
+                        .setArtist(resolvedTrack.artist)
+                        .apply { if (artworkUri != null) setArtworkUri(artworkUri) }
+                        .build()
+                    val mediaItem = MediaItem.Builder()
+                        .setMediaId(resolvedTrack.id)
+                        .setUri(mediaUri)
+                        .setMediaMetadata(mediaMetadata)
+                        .build()
+
                     val controller = mediaController
                     if (controller != null) {
+                        pendingMediaItem = null
                         controller.volume = 1f
                         controller.setPlaybackSpeed(_playbackState.value.playbackSpeed)
-                        val mediaMetadata = MediaMetadata.Builder()
-                            .setTitle(resolvedTrack.title)
-                            .setArtist(resolvedTrack.artist)
-                            .setArtworkUri(Uri.parse(resolvedTrack.thumbnailUrl))
-                            .build()
-                        val mediaItem = MediaItem.Builder()
-                            .setMediaId(resolvedTrack.id)
-                            .setUri(mediaUri)
-                            .setMediaMetadata(mediaMetadata)
-                            .build()
-                        controller.setMediaItem(mediaItem)
+                        if (clampedStartPos > 0L) {
+                            controller.setMediaItem(mediaItem, clampedStartPos)
+                        } else {
+                            controller.setMediaItem(mediaItem)
+                        }
                         controller.prepare()
                         controller.play()
                     } else {
+                        pendingMediaItem = mediaItem to clampedStartPos
+                        pendingRestorePositionMs = clampedStartPos
                         connectController()
                     }
 
@@ -381,7 +543,7 @@ class PlaybackManager @Inject constructor(
                             errorMessage = if (stalledOnNetwork) {
                                 "Офлайн: скачайте треки для прослушивания без сети."
                             } else {
-                                throwable.localizedMessage ?: "Не удалось загрузить аудиопоток"
+                                FriendlyErrorMapper.map(throwable, "Не удалось загрузить аудиопоток")
                             }
                         )
                     }
@@ -391,24 +553,45 @@ class PlaybackManager @Inject constructor(
     }
 
     fun togglePlayPause() {
-        val controller = mediaController ?: return
+        val controller = mediaController
+        if (controller == null) {
+            val idx = _playbackState.value.currentIndex
+            if (idx in _playbackState.value.queue.indices) {
+                val resumePos = pendingRestorePositionMs
+                pendingRestorePositionMs = 0L
+                loadAndPlayAtIndex(idx, resumePos)
+            } else {
+                connectController()
+            }
+            return
+        }
         controller.volume = 1f
         if (controller.isPlaying) {
             controller.pause()
         } else if (controller.mediaItemCount > 0) {
             controller.play()
         } else {
-            val current = _playbackState.value.currentTrack ?: return
-            playTrack(current, _playbackState.value.queue)
+            val state = _playbackState.value
+            val idx = state.currentIndex
+            if (idx in state.queue.indices) {
+                val resumePos = pendingRestorePositionMs.takeIf { it > 0L } ?: state.positionMs
+                pendingRestorePositionMs = 0L
+                loadAndPlayAtIndex(idx, resumePos)
+            } else {
+                val current = state.currentTrack ?: return
+                playTrack(current, state.queue)
+            }
         }
     }
 
     fun seekTo(positionMs: Long) {
         val clamped = positionMs.coerceAtLeast(0L)
+        pendingRestorePositionMs = if (mediaController?.mediaItemCount == 0) clamped else 0L
         mediaController?.seekTo(clamped)
         val dur = _playbackProgress.value.durationMs.takeIf { it > 0L } ?: _playbackState.value.durationMs
         _playbackProgress.value = PlaybackProgress(positionMs = clamped, durationMs = dur)
         _playbackState.update { it.copy(positionMs = clamped) }
+        schedulePersistPlaybackState()
     }
 
     fun skipNext() {
@@ -448,6 +631,7 @@ class PlaybackManager @Inject constructor(
 
     fun toggleShuffle() {
         _playbackState.update { it.copy(shuffleEnabled = !it.shuffleEnabled) }
+        schedulePersistPlaybackState()
     }
 
     fun cycleRepeatMode() {
@@ -459,12 +643,14 @@ class PlaybackManager @Inject constructor(
             }
             state.copy(repeatMode = nextMode)
         }
+        schedulePersistPlaybackState()
     }
 
     fun setPlaybackSpeed(speed: Float) {
         val clamped = speed.coerceIn(0.5f, 2.0f)
         mediaController?.setPlaybackSpeed(clamped)
         _playbackState.update { it.copy(playbackSpeed = clamped) }
+        schedulePersistPlaybackState()
     }
 
     fun startSleepTimer(minutes: Int) {
@@ -548,10 +734,6 @@ class PlaybackManager @Inject constructor(
         progressJob?.cancel()
         progressJob = scope.launch {
             while (isActive) {
-                // Suspend with 0 CPU wakeups while UI is backgrounded or no progress observer is active
-                if (_playbackProgress.subscriptionCount.value == 0) {
-                    _playbackProgress.subscriptionCount.first { it > 0 }
-                }
                 val controller = mediaController
                 if (controller != null) {
                     val pos = controller.currentPosition.coerceAtLeast(0L)
@@ -559,6 +741,12 @@ class PlaybackManager @Inject constructor(
                     val next = PlaybackProgress(positionMs = pos, durationMs = dur)
                     if (_playbackProgress.value != next) {
                         _playbackProgress.value = next
+                    }
+                    _playbackState.update { it.copy(positionMs = pos, durationMs = dur) }
+                    val now = System.currentTimeMillis()
+                    if (now - lastPersistedPositionAtMs >= 5_000L) {
+                        lastPersistedPositionAtMs = now
+                        persistNow()
                     }
                 }
                 delay(500L)
@@ -568,5 +756,46 @@ class PlaybackManager @Inject constructor(
 
     private fun stopProgressLoop() {
         progressJob?.cancel()
+    }
+
+    private fun schedulePersistPlaybackState() {
+        if (playbackPersistenceStore == null) return
+        persistJob?.cancel()
+        persistJob = scope.launch {
+            delay(250L)
+            persistNow()
+        }
+    }
+
+    private suspend fun persistNow() {
+        val store = playbackPersistenceStore ?: return
+        val snapshot = buildPersistedSnapshot()
+        store.savePlaybackState(snapshot)
+    }
+
+    private fun buildPersistedSnapshot(): PersistedPlaybackState {
+        val state = _playbackState.value
+        val currentPos = mediaController?.currentPosition?.coerceAtLeast(0L) ?: state.positionMs
+        return PersistedPlaybackState(
+            queue = state.queue,
+            currentIndex = state.currentIndex,
+            positionMs = currentPos,
+            shuffleEnabled = state.shuffleEnabled,
+            repeatMode = state.repeatMode,
+            playbackSpeed = state.playbackSpeed
+        )
+    }
+
+    suspend fun getPersistedStateSnapshot(): PersistedPlaybackState {
+        initialRestoreJob?.join()
+        return buildPersistedSnapshot()
+    }
+
+    suspend fun applyRestoredState(restored: PersistedPlaybackState) {
+        hasUserPlaybackStarted = true
+        mediaController?.stop()
+        mediaController?.clearMediaItems()
+        applyRestoredStateInternal(restored)
+        playbackPersistenceStore?.savePlaybackState(buildPersistedSnapshot())
     }
 }

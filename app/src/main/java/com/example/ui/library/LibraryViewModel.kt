@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
+import com.example.core.common.FriendlyErrorMapper
 import com.example.data.local.TrackDownloadManager
 import com.example.domain.model.PlaybackState
 import com.example.domain.model.Playlist
@@ -97,7 +98,7 @@ class LibraryViewModel @Inject constructor(
             result.onSuccess { added ->
                 onNotice("Радио запущено: +$added треков")
             }.onFailure { err ->
-                onNotice(err.localizedMessage ?: "Не удалось запустить радио")
+                onNotice(FriendlyErrorMapper.map(err, "Не удалось запустить радио"))
             }
         }
     }
@@ -118,7 +119,7 @@ class LibraryViewModel @Inject constructor(
                 trackDownloadManager.downloadTrack(track).onSuccess {
                     onNotice("Сохранено для офлайн-прослушивания")
                 }.onFailure { err ->
-                    onNotice(err.localizedMessage ?: "Ошибка загрузки")
+                    onNotice(FriendlyErrorMapper.map(err, "Ошибка загрузки"))
                 }
             }
         }
@@ -177,8 +178,10 @@ class LibraryViewModel @Inject constructor(
                     isImporting.value = false
                 },
                 onFailure = { throwable ->
-                    importError.value = throwable.localizedMessage
-                        ?: "Не удалось импортировать плейлист. Проверьте, что он открытый."
+                    importError.value = FriendlyErrorMapper.map(
+                        throwable,
+                        "Не удалось импортировать плейлист. Проверьте, что он открытый."
+                    )
                     isImporting.value = false
                 }
             )
@@ -265,7 +268,7 @@ class PlaylistDetailViewModel @Inject constructor(
             result.onSuccess { added ->
                 onNotice("Радио запущено: +$added треков")
             }.onFailure { err ->
-                onNotice(err.localizedMessage ?: "Не удалось запустить радио")
+                onNotice(FriendlyErrorMapper.map(err, "Не удалось запустить радио"))
             }
         }
     }
@@ -317,7 +320,7 @@ class PlaylistDetailViewModel @Inject constructor(
                 trackDownloadManager.downloadTrack(track).onSuccess {
                     onNotice("Сохранено для офлайн-прослушивания")
                 }.onFailure { err ->
-                    onNotice(err.localizedMessage ?: "Ошибка загрузки")
+                    onNotice(FriendlyErrorMapper.map(err, "Ошибка загрузки"))
                 }
             }
         }

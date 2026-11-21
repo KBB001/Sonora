@@ -151,52 +151,65 @@ class AppUpdateRepository @Inject constructor(
             "Недопустимый путь сохранения файла обновления"
         }
 
-        val request = Request.Builder()
-            .url(info.downloadUrl)
-            .header("User-Agent", "SonoraAndroid/${BuildConfig.VERSION_NAME}")
-            .build()
+        try {
+            val request = Request.Builder()
+                .url(info.downloadUrl)
+                .header("User-Agent", "SonoraAndroid/${BuildConfig.VERSION_NAME}")
+                .build()
 
-        okHttpClient.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                throw IllegalStateException("Ошибка скачивания APK (HTTP ${response.code})")
-            }
-            val body = response.body ?: throw IllegalStateException("Пустой файл APK")
-            val totalBytes = body.contentLength().takeIf { it > 0L } ?: info.assetSizeBytes
+            okHttpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    throw IllegalStateException("Ошибка скачивания APK (HTTP ${response.code})")
+                }
+                val body = response.body ?: throw IllegalStateException("Пустой файл APK")
+                val totalBytes = body.contentLength().takeIf { it > 0L } ?: info.assetSizeBytes
 
-            body.byteStream().use { input ->
-                tempFile.outputStream().use { output ->
-                    val buffer = ByteArray(64 * 1024)
-                    var downloaded = 0L
-                    var lastEmittedMs = 0L
-                    while (true) {
-                        val read = input.read(buffer)
-                        if (read == -1) break
-                        output.write(buffer, 0, read)
-                        downloaded += read
+                body.byteStream().use { input ->
+                    tempFile.outputStream().use { output ->
+                        val buffer = ByteArray(64 * 1024)
+                        var downloaded = 0L
+                        var lastEmittedMs = 0L
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read == -1) break
+                            output.write(buffer, 0, read)
+                            downloaded += read
 
-                        val now = System.currentTimeMillis()
-                        if (now - lastEmittedMs >= 80L || downloaded == totalBytes) {
-                            lastEmittedMs = now
-                            val fraction = if (totalBytes > 0L) {
-                                (downloaded.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
-                            } else {
-                                -1f
+                            val now = System.currentTimeMillis()
+                            if (now - lastEmittedMs >= 80L || downloaded == totalBytes) {
+                                lastEmittedMs = now
+                                val fraction = if (totalBytes > 0L) {
+                                    (downloaded.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
+                                } else {
+                                    -1f
+                                }
+                                emit(ApkDownloadEvent.Progress(fraction, downloaded, totalBytes))
                             }
-                            emit(ApkDownloadEvent.Progress(fraction, downloaded, totalBytes))
                         }
+                        output.flush()
                     }
-                    output.flush()
                 }
             }
-        }
 
-        if (finalFile.exists()) finalFile.delete()
-        if (!tempFile.renameTo(finalFile)) {
-            tempFile.copyTo(finalFile, overwrite = true)
-            tempFile.delete()
-        }
+            if (!tempFile.exists() || tempFile.length() <= 0L) {
+                throw IllegalStateException("Загруженный файл обновления пуст или повреждён")
+            }
 
-        emit(ApkDownloadEvent.Completed(finalFile))
+            if (finalFile.exists()) finalFile.delete()
+            if (!tempFile.renameTo(finalFile)) {
+                tempFile.copyTo(finalFile, overwrite = true)
+                tempFile.delete()
+            }
+            if (!finalFile.exists() || finalFile.length() <= 0L) {
+                throw IllegalStateException("Не удалось сохранить файл обновления")
+            }
+
+            emit(ApkDownloadEvent.Completed(finalFile))
+        } finally {
+            if (tempFile.exists()) {
+                tempFile.delete()
+            }
+        }
     }.flowOn(Dispatchers.IO)
 
     private data class ApkAsset(

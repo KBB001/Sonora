@@ -252,4 +252,261 @@ class ExampleRobolectricTest {
       db.close()
     }
   }
+
+  @Test
+  fun `room migration 1 to 3 preserves all existing tables without destructive wipe`() = kotlinx.coroutines.runBlocking {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val dbName = "migration_v1_v3_${System.nanoTime()}.db"
+    val helper = object : android.database.sqlite.SQLiteOpenHelper(context, dbName, null, 1) {
+      override fun onCreate(db: android.database.sqlite.SQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS `favorite_tracks` (`id` TEXT NOT NULL, `title` TEXT NOT NULL, `artist` TEXT NOT NULL, `durationSeconds` INTEGER NOT NULL, `thumbnailUrl` TEXT NOT NULL, `addedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `history_tracks` (`id` TEXT NOT NULL, `title` TEXT NOT NULL, `artist` TEXT NOT NULL, `durationSeconds` INTEGER NOT NULL, `thumbnailUrl` TEXT NOT NULL, `playedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `playlists` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `name` TEXT NOT NULL, `description` TEXT NOT NULL, `coverUrl` TEXT, `createdAt` INTEGER NOT NULL)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `playlist_tracks` (`playlistId` INTEGER NOT NULL, `trackId` TEXT NOT NULL, `title` TEXT NOT NULL, `artist` TEXT NOT NULL, `durationSeconds` INTEGER NOT NULL, `thumbnailUrl` TEXT NOT NULL, `addedAt` INTEGER NOT NULL, PRIMARY KEY(`playlistId`, `trackId`), FOREIGN KEY(`playlistId`) REFERENCES `playlists`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_playlist_tracks_playlistId` ON `playlist_tracks` (`playlistId`)")
+        db.execSQL("INSERT INTO `favorite_tracks` VALUES ('fav_1', 'Fav Song', 'Artist A', 200, 'https://img.example/1.jpg', 1000)")
+        db.execSQL("INSERT INTO `playlists` (`id`, `name`, `description`, `coverUrl`, `createdAt`) VALUES (7, 'Legacy Mix', 'V1 Desc', NULL, 2000)")
+      }
+
+      override fun onUpgrade(db: android.database.sqlite.SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    }
+    helper.writableDatabase.close()
+    helper.close()
+
+    val migratedDb = androidx.room.Room.databaseBuilder(
+      context,
+      com.example.data.local.SonoraDatabase::class.java,
+      dbName
+    )
+      .addMigrations(
+        com.example.di.DatabaseModule.MIGRATION_1_2,
+        com.example.di.DatabaseModule.MIGRATION_2_3
+      )
+      .allowMainThreadQueries()
+      .build()
+
+    try {
+      org.junit.Assert.assertTrue(migratedDb.favoriteDao().isFavorite("fav_1"))
+      val playlist = migratedDb.playlistDao().findByNameIgnoreCase("Legacy Mix")
+      assertEquals(7L, playlist?.id)
+      migratedDb.searchHistoryDao().upsertQuery(
+        com.example.data.local.entity.SearchHistoryEntity(query = "Ambient")
+      )
+    } finally {
+      migratedDb.close()
+      context.deleteDatabase(dbName)
+    }
+  }
+
+  @Test
+  fun `libraryBackup v2 export and idempotent import preserves playlists history search and supports v1`() = kotlinx.coroutines.runBlocking {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val db = androidx.room.Room.inMemoryDatabaseBuilder(
+      context,
+      com.example.data.local.SonoraDatabase::class.java
+    ).allowMainThreadQueries().build()
+
+    try {
+      val repo = com.example.data.repository.LibraryRepositoryImpl(
+        favoriteDao = db.favoriteDao(),
+        historyDao = db.historyDao(),
+        playlistDao = db.playlistDao(),
+        downloadedTrackDao = db.downloadedTrackDao(),
+        searchHistoryDao = db.searchHistoryDao(),
+        context = context
+      )
+
+      val t1 = com.example.domain.model.Track(
+        id = "trk_1",
+        title = "Night Drive",
+        artist = "Synth",
+        durationSeconds = 210,
+        thumbnailUrl = "https://img.example/t1.jpg",
+        streamUrl = "https://ephemeral.stream/audio"
+      )
+      repo.toggleFavorite(t1)
+      repo.recordPlayback(t1)
+      repo.recordSearchQuery("Synthwave")
+      repo.createPlaylist("Roadtrip", "Late night", listOf(t1), youtubePlaylistId = "PL_REMOTE_1")
+
+      val json = repo.exportBackupJson()
+      org.junit.Assert.assertFalse(json.contains("ephemeral.stream"))
+      org.junit.Assert.assertTrue(json.contains("Synthwave"))
+      org.junit.Assert.assertTrue(json.contains("PL_REMOTE_1"))
+
+      // Importing same backup twice must remain idempotent with zero duplicate playlists
+      val firstImport = repo.importBackupJson(json).getOrThrow()
+      val secondImport = repo.importBackupJson(json).getOrThrow()
+      assertEquals(0, firstImport)
+      assertEquals(0, secondImport)
+      assertEquals(1, repo.getAllPlaylistsWithTracks().size)
+
+      // Backwards compatibility: v1 JSON import restores favorites, playlists, and strips http thumbnails
+      val v1Json = """
+        {
+          "version": 1,
+          "favorites": [
+            {"id": "v1_fav", "title": "Old Song", "artist": "Old Artist", "durationSeconds": 180, "thumbnailUrl": "http://insecure.example/x.jpg"}
+          ],
+          "playlists": [
+            {"name": "V1 Playlist", "description": "Restored", "tracks": [{"id": "v1_fav", "title": "Old Song", "artist": "Old Artist", "durationSeconds": 180, "thumbnailUrl": "https://safe.example/x.jpg"}]}
+          ]
+        }
+      """.trimIndent()
+      val v1Result = repo.importBackupJson(v1Json)
+      org.junit.Assert.assertTrue(v1Result.isSuccess)
+      assertEquals(2, repo.getAllPlaylistsWithTracks().size)
+      val playlists = repo.getAllPlaylistsWithTracks().map { it.first.name }.toSet()
+      org.junit.Assert.assertTrue("V1 Playlist" in playlists)
+    } finally {
+      db.close()
+    }
+  }
+
+  @Test
+  fun `playbackPersistenceStore roundTrips queue position speed and equalizer config safely`() = kotlinx.coroutines.runBlocking {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val store = com.example.data.repository.PlaybackPersistenceStore(context)
+    val track = com.example.domain.model.Track(
+      id = "q_1",
+      title = "Focus Track",
+      artist = "Artist",
+      durationSeconds = 240,
+      thumbnailUrl = "https://img.example/q1.jpg",
+      streamUrl = "https://expires.example/stream"
+    )
+    store.savePlaybackState(
+      com.example.domain.model.PersistedPlaybackState(
+        queue = listOf(track),
+        currentIndex = 0,
+        positionMs = 42_000L,
+        shuffleEnabled = true,
+        repeatMode = com.example.domain.model.RepeatMode.ALL,
+        playbackSpeed = 1.25f
+      )
+    )
+    val restoredPlayback = store.readPlaybackState()!!
+    assertEquals(1, restoredPlayback.queue.size)
+    org.junit.Assert.assertNull(restoredPlayback.queue.first().streamUrl)
+    assertEquals(42_000L, restoredPlayback.positionMs)
+    assertEquals(true, restoredPlayback.shuffleEnabled)
+    assertEquals(com.example.domain.model.RepeatMode.ALL, restoredPlayback.repeatMode)
+    assertEquals(1.25f, restoredPlayback.playbackSpeed)
+
+    store.saveEqualizerState(
+      com.example.domain.model.PersistedEqualizerState(
+        isEnabled = true,
+        selectedPresetIndex = 2,
+        bandLevels = listOf(300, 100, 0, 200, 400),
+        customBandsApplied = true
+      )
+    )
+    val restoredEq = store.readEqualizerState()!!
+    assertEquals(true, restoredEq.isEnabled)
+    assertEquals(2, restoredEq.selectedPresetIndex)
+    assertEquals(listOf<Short>(300, 100, 0, 200, 400), restoredEq.bandLevels)
+    assertEquals(true, restoredEq.customBandsApplied)
+  }
+
+  @Test
+  fun `downloaded offline file lookup recovers relocated file inside offline_tracks`() = kotlinx.coroutines.runBlocking {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val db = androidx.room.Room.inMemoryDatabaseBuilder(
+      context,
+      com.example.data.local.SonoraDatabase::class.java
+    ).allowMainThreadQueries().build()
+    val offlineDir = java.io.File(context.filesDir, "offline_tracks").apply { mkdirs() }
+    val actualFile = java.io.File(offlineDir, "trk_offline_1.m4a")
+    actualFile.writeBytes(byteArrayOf(1, 2, 3, 4))
+
+    try {
+      val repo = com.example.data.repository.LibraryRepositoryImpl(
+        favoriteDao = db.favoriteDao(),
+        historyDao = db.historyDao(),
+        playlistDao = db.playlistDao(),
+        downloadedTrackDao = db.downloadedTrackDao(),
+        searchHistoryDao = db.searchHistoryDao(),
+        context = context
+      )
+      val track = com.example.domain.model.Track(
+        id = "trk_offline_1",
+        title = "Offline Song",
+        artist = "Offline Artist",
+        durationSeconds = 180,
+        thumbnailUrl = "https://img.example/off.jpg"
+      )
+      // Simulate old sandbox prefix path stored before OS profile/update migration
+      repo.saveDownloadedTrack(
+        track = track,
+        filePath = "/data/user/999/com.example/files/offline_tracks/trk_offline_1.m4a",
+        fileSizeBytes = 4L
+      )
+      val resolvedPath = repo.getDownloadedFilePath("trk_offline_1")
+      assertEquals(actualFile.absolutePath, resolvedPath)
+    } finally {
+      actualFile.delete()
+      db.close()
+    }
+  }
+
+  @Test
+  fun `apkInstaller rejects missing zero-byte and corrupted apk archives`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val updatesDir = java.io.File(context.cacheDir, "test_apk_${System.nanoTime()}").apply { mkdirs() }
+    val missingFile = java.io.File(updatesDir, "missing.apk")
+    val emptyFile = java.io.File(updatesDir, "empty.apk").apply { createNewFile() }
+    val corruptFile = java.io.File(updatesDir, "corrupt.apk").apply { writeText("not a valid apk zip") }
+
+    try {
+      assertEquals(
+        com.example.core.common.ApkInstallCompatibility.InvalidArchive,
+        com.example.core.common.ApkInstaller.checkInstallCompatibility(context, missingFile)
+      )
+      assertEquals(
+        com.example.core.common.ApkInstallCompatibility.InvalidArchive,
+        com.example.core.common.ApkInstaller.checkInstallCompatibility(context, emptyFile)
+      )
+      assertEquals(
+        com.example.core.common.ApkInstallCompatibility.InvalidArchive,
+        com.example.core.common.ApkInstaller.checkInstallCompatibility(context, corruptFile)
+      )
+    } finally {
+      updatesDir.deleteRecursively()
+    }
+  }
+
+  @Test
+  fun `youtubeAccountApi normalizes thumbnails rejects http and ignores JSON null literals`() {
+    val thumbs = org.json.JSONArray(
+      """
+      [
+        {"url": "http://insecure.example/large.jpg", "width": 800, "height": 800},
+        {"url": "//lh3.googleusercontent.com/small.jpg", "width": 120, "height": 120},
+        {"url": "//lh3.googleusercontent.com/medium.jpg", "width": 320, "height": 320}
+      ]
+      """.trimIndent()
+    )
+    assertEquals(
+      "https://lh3.googleusercontent.com/medium.jpg",
+      YouTubeMusicAccountApi.pickLargestThumbnailUrl(thumbs)
+    )
+
+    val profileWithNulls = JSONObject(
+      """
+      {
+        "activeAccountHeaderRenderer": {
+          "accountName": {"runs": [{"text": "Null Safe User"}]},
+          "channelHandle": {"simpleText": null},
+          "email": {"simpleText": "null"},
+          "accountPhoto": {"thumbnails": [{"url": "//yt3.ggpht.com/avatar.jpg", "width": 64, "height": 64}]}
+        }
+      }
+      """.trimIndent()
+    )
+    val parsed = YouTubeMusicAccountApi.parseAccountProfile(profileWithNulls)
+    assertEquals("Null Safe User", parsed?.name)
+    assertEquals("", parsed?.handle)
+    assertEquals("", parsed?.email)
+    assertEquals("https://yt3.ggpht.com/avatar.jpg", parsed?.avatarUrl)
+  }
 }

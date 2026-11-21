@@ -62,7 +62,7 @@ class SonoraWidget : GlanceAppWidget() {
         provideContent {
             val prefs = currentState<androidx.datastore.preferences.core.Preferences>()
             val title = prefs[SonoraWidgetKeys.TRACK_TITLE] ?: "Sonora"
-            val artist = prefs[SonoraWidgetKeys.TRACK_ARTIST] ?: "Tap to play music"
+            val artist = prefs[SonoraWidgetKeys.TRACK_ARTIST] ?: "Нажмите для воспроизведения"
             val isPlaying = prefs[SonoraWidgetKeys.IS_PLAYING] ?: false
 
             WidgetContent(
@@ -198,8 +198,11 @@ private suspend fun dispatchMediaAction(
             val controller = withContext(Dispatchers.IO) {
                 future.get(3, TimeUnit.SECONDS)
             }
-            action(controller)
-            controller.release()
+            try {
+                action(controller)
+            } finally {
+                controller.release()
+            }
         }
     }
 }

@@ -3,6 +3,7 @@ package com.example.ui.player
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.core.common.FriendlyErrorMapper
 import com.example.core.common.NetworkMonitor
 import com.example.data.local.TrackDownloadManager
 import com.example.data.remote.LyricsRepository
@@ -128,7 +129,7 @@ class PlayerViewModel @Inject constructor(
                 },
                 onFailure = { err ->
                     lyricsFlow.value = LyricsUiState.Error(
-                        err.localizedMessage ?: "Текст песни недоступен."
+                        FriendlyErrorMapper.map(err, "Текст песни недоступен.")
                     )
                 }
             )
@@ -172,7 +173,7 @@ class PlayerViewModel @Inject constructor(
             result.onSuccess { added ->
                 onNotice("Радио запущено: добавлено $added треков")
             }.onFailure { err ->
-                onNotice(err.localizedMessage ?: "Не удалось запустить радио")
+                onNotice(FriendlyErrorMapper.map(err, "Не удалось запустить радио"))
             }
         }
     }
@@ -204,7 +205,7 @@ class PlayerViewModel @Inject constructor(
                 trackDownloadManager.downloadTrack(track).onSuccess {
                     onNotice("Сохранено для офлайн-прослушивания")
                 }.onFailure { err ->
-                    onNotice(err.localizedMessage ?: "Ошибка загрузки")
+                    onNotice(FriendlyErrorMapper.map(err, "Ошибка загрузки"))
                 }
             }
         }

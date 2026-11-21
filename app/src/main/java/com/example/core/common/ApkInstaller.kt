@@ -17,6 +17,7 @@ import java.security.MessageDigest
 sealed interface ApkInstallCompatibility {
     data object Compatible : ApkInstallCompatibility
     data object SignatureMismatch : ApkInstallCompatibility
+    data object InvalidArchive : ApkInstallCompatibility
     data class VersionDowngrade(val archiveVersionCode: Long, val installedVersionCode: Long) :
         ApkInstallCompatibility
 }
@@ -50,6 +51,9 @@ object ApkInstaller {
     }
 
     fun checkInstallCompatibility(context: Context, apkFile: File): ApkInstallCompatibility {
+        if (!apkFile.exists() || apkFile.length() <= 0L) {
+            return ApkInstallCompatibility.InvalidArchive
+        }
         return runCatching {
             val pm = context.packageManager
             val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -77,7 +81,7 @@ object ApkInstaller {
             } else {
                 @Suppress("DEPRECATION")
                 pm.getPackageArchiveInfo(apkFile.absolutePath, flags)
-            } ?: return ApkInstallCompatibility.Compatible
+            } ?: return ApkInstallCompatibility.InvalidArchive
 
             val installedDigests = extractCertDigests(installedInfo)
             val archiveDigests = extractCertDigests(archiveInfo)
@@ -104,7 +108,7 @@ object ApkInstaller {
             }
 
             ApkInstallCompatibility.Compatible
-        }.getOrDefault(ApkInstallCompatibility.Compatible)
+        }.getOrDefault(ApkInstallCompatibility.InvalidArchive)
     }
 
     fun saveApkToDownloads(context: Context, apkFile: File, displayName: String = apkFile.name): Result<String> {

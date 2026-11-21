@@ -1,6 +1,8 @@
 package com.example
 
 import android.Manifest
+import android.app.SearchManager
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -22,6 +24,7 @@ import com.example.domain.repository.SettingsRepository
 import com.example.ui.navigation.SonoraNavHost
 import com.example.ui.theme.SonoraTheme
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.flow.MutableStateFlow
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -30,8 +33,11 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var settingsRepository: SettingsRepository
 
+    private val pendingSearchQueryFlow = MutableStateFlow<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        handleIncomingIntent(intent)
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
@@ -40,6 +46,7 @@ class MainActivity : ComponentActivity() {
             val appSettings by settingsRepository.settings.collectAsStateWithLifecycle(
                 initialValue = AppSettings()
             )
+            val pendingSearchQuery by pendingSearchQueryFlow.collectAsStateWithLifecycle()
             val isDark = when (appSettings.themeMode) {
                 AppThemeMode.DARK -> true
                 AppThemeMode.LIGHT -> false
@@ -80,8 +87,26 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                SonoraNavHost()
+                SonoraNavHost(
+                    pendingSearchQuery = pendingSearchQuery,
+                    onConsumePendingSearchQuery = { pendingSearchQueryFlow.value = null }
+                )
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncomingIntent(intent)
+    }
+
+    private fun handleIncomingIntent(intent: Intent?) {
+        if (intent == null) return
+        val query = intent.getStringExtra(SearchManager.QUERY)
+            ?: intent.getStringExtra(Intent.EXTRA_TEXT)
+        if (!query.isNullOrBlank()) {
+            pendingSearchQueryFlow.value = query.trim()
         }
     }
 }

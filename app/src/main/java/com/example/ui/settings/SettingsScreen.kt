@@ -139,8 +139,21 @@ fun SettingsScreen(
                 } else {
                     viewModel.restoreBackupJson(json) { result ->
                         result.fold(
-                            onSuccess = { count ->
-                                onShowMessage("Восстановлено треков: $count")
+                            onSuccess = { summary ->
+                                val parts = buildList {
+                                    if (summary.tracksRestored > 0) add("треков: ${summary.tracksRestored}")
+                                    if (summary.playlistsRestored > 0) add("плейлистов: ${summary.playlistsRestored}")
+                                    if (summary.searchQueriesRestored > 0) add("запросов: ${summary.searchQueriesRestored}")
+                                    if (summary.settingsRestored) add("настройки")
+                                    if (summary.playbackRestored) add("очередь")
+                                    if (summary.equalizerRestored) add("эквалайзер")
+                                }
+                                val msg = if (parts.isEmpty()) {
+                                    "Резервная копия применена"
+                                } else {
+                                    "Восстановлено (${parts.joinToString(", ")})"
+                                }
+                                onShowMessage(msg)
                             },
                             onFailure = {
                                 onShowMessage("Некорректный JSON-файл резервной копии")
@@ -170,9 +183,17 @@ fun SettingsScreen(
     }
 
     fun triggerApkInstall(file: File) {
-        if (ApkInstaller.checkInstallCompatibility(context, file) !is ApkInstallCompatibility.Compatible) {
-            onShowMessage("Этот APK нельзя установить поверх текущей версии. Сохраните его в «Загрузки» и переустановите приложение.")
-            return
+        when (ApkInstaller.checkInstallCompatibility(context, file)) {
+            is ApkInstallCompatibility.InvalidArchive -> {
+                onShowMessage("APK-файл повреждён или неполный. Повторите загрузку обновления.")
+                return
+            }
+            is ApkInstallCompatibility.SignatureMismatch,
+            is ApkInstallCompatibility.VersionDowngrade -> {
+                onShowMessage("Этот APK нельзя установить поверх текущей версии. Сохраните его в «Загрузки» и переустановите приложение.")
+                return
+            }
+            ApkInstallCompatibility.Compatible -> Unit
         }
         if (ApkInstaller.canRequestPackageInstalls(context)) {
             ApkInstaller.launchApkInstaller(context, file).onFailure { err ->
@@ -297,6 +318,8 @@ fun SettingsScreen(
                         when {
                             savedMismatchApkName != null ->
                                 "Файл сохранён в «Загрузки»"
+                            compatibility is ApkInstallCompatibility.InvalidArchive ->
+                                "Повреждённый APK-файл"
                             compatibility is ApkInstallCompatibility.SignatureMismatch ->
                                 "Требуется переустановка (${updateState.info.tagName})"
                             compatibility is ApkInstallCompatibility.VersionDowngrade ->
@@ -309,14 +332,20 @@ fun SettingsScreen(
                 text = {
                     Text(
                         text = when {
-                            savedMismatchApkName != null ->
-                                "APK «$savedMismatchApkName» сохранён в папку «Загрузки».\n\n1. Нажмите «Удалить текущую» и подтвердите удаление старой версии.\n2. Откройте файл «$savedMismatchApkName» в «Загрузках».\n\nПосле этой разовой переустановки все будущие обновления будут устанавливаться автоматически."
+                            savedMismatchApkName != null -> {
+                                val backupNote = uiState.lastAutoBackupLocation?.let {
+                                    "\n\nРезервная копия данных сохранена в «$it». После переустановки откройте Настройки -> Импорт JSON и выберите этот файл."
+                                } ?: ""
+                                "APK «$savedMismatchApkName» сохранён в папку «Загрузки».\n\n1. Нажмите «Удалить текущую» и подтвердите удаление старой версии.\n2. Откройте файл «$savedMismatchApkName» в «Загрузках».\n\nПосле этой разовой переустановки все будущие обновления будут устанавливаться автоматически.$backupNote"
+                            }
+                            compatibility is ApkInstallCompatibility.InvalidArchive ->
+                                "Загруженный APK-файл повреждён или скачался не полностью. Закройте окно и запустите проверку обновлений заново."
                             compatibility is ApkInstallCompatibility.SignatureMismatch ->
-                                "Установленная версия собрана со старым временным ключом, поэтому Android блокирует обновление поверх («Приложение не установлено»).\n\nСохраните APK в папку «Загрузки», удалите старую Sonora 1 раз и установите скачанный файл. Дальнейшие обновления будут ставиться поверх без удаления."
+                                "Установленная версия собрана со старым ключом, поэтому Android блокирует обновление поверх («Приложение не установлено»).\n\nПеред удалением Sonora автоматически сохранит резервную копию всех ваших треков, плейлистов, настроек и очереди в «Downloads/Sonora/sonora_auto_backup.json». После установки нового APK восстановите её в «Настройки -> Импорт JSON»."
                             compatibility is ApkInstallCompatibility.VersionDowngrade ->
                                 "Код сборки в APK (${compatibility.archiveVersionCode}) ниже установленного (${compatibility.installedVersionCode}). Сохраните файл в «Загрузки» или переустановите приложение вручную."
                             else ->
-                                "APK-файл загружен. Нажмите «Установить», чтобы запустить системный установщик."
+                                "APK-файл загружен. Нажмите «Установить», чтобы запустить системный установщик. Все ваши данные сохранятся."
                         },
                         style = MaterialTheme.typography.bodyMedium
                     )
@@ -339,11 +368,21 @@ fun SettingsScreen(
                             }
                         }
 
+                        compatibility is ApkInstallCompatibility.InvalidArchive -> {
+                            Button(
+                                onClick = closeDialog,
+                                modifier = Modifier.testTag("invalid_apk_close_button")
+                            ) {
+                                Text("Понятно")
+                            }
+                        }
+
                         compatibility is ApkInstallCompatibility.SignatureMismatch ||
                             compatibility is ApkInstallCompatibility.VersionDowngrade -> {
                             Button(
                                 onClick = {
                                     scope.launch {
+                                        viewModel.savePreUpdateBackupSnapshot()
                                         val displayName = updateState.info.assetName.ifBlank {
                                             "sonora-${updateState.info.tagName}.apk"
                                         }
@@ -458,7 +497,7 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.bodyLarge
                 )
                 Text(
-                    text = "Репозиторий: ${BuildConfig.GITHUB_REPOSITORY}",
+                    text = "Медиатека, история, настройки, эквалайзер и очередь сохраняются при обновлении",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -698,6 +737,12 @@ fun SettingsScreen(
                         Text("Очистить")
                     }
                 }
+
+                Text(
+                    text = "Резервная копия сохраняет избранное, историю, плейлисты, историю поиска, настройки, эквалайзер и очередь воспроизведения.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),

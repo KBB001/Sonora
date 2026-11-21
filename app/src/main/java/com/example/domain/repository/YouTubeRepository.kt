@@ -13,7 +13,8 @@ interface YouTubeRepository {
     suspend fun getSearchSuggestions(query: String): List<String>
     suspend fun getAudioStreamUrl(
         videoId: String,
-        audioQuality: AudioQuality = AudioQuality.HIGH
+        audioQuality: AudioQuality = AudioQuality.HIGH,
+        forceRefresh: Boolean = false
     ): Result<String>
     suspend fun getRelatedTracks(videoId: String): Result<List<Track>>
     suspend fun getPlaylistTracks(playlistUrl: String): Result<List<Track>>

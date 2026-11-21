@@ -77,8 +77,9 @@ fun HomeScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var trackForPlaylistDialog by remember { mutableStateOf<Track?>(null) }
 
-    val greeting = remember {
-        when (Calendar.getInstance().get(Calendar.HOUR_OF_DAY)) {
+    val currentHour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+    val greeting = remember(currentHour) {
+        when (currentHour) {
             in 5..11 -> "Доброе утро"
             in 12..17 -> "Добрый день"
             in 18..22 -> "Добрый вечер"
@@ -205,7 +206,10 @@ fun HomeScreen(
                     Text(
                         text = "Подборка по настроению",
                         style = MaterialTheme.typography.headlineSmall,
-                        color = MaterialTheme.colorScheme.onBackground
+                        color = MaterialTheme.colorScheme.onBackground,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
                     )
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         val discoverTracks = (uiState.discoverState as? DiscoverUiState.Success)?.tracks

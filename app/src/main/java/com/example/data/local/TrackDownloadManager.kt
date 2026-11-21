@@ -1,6 +1,7 @@
 package com.example.data.local
 
 import android.content.Context
+import com.example.core.common.FriendlyErrorMapper
 import com.example.domain.model.Track
 import com.example.domain.repository.LibraryRepository
 import com.example.domain.repository.SettingsRepository
@@ -17,6 +18,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
+import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -39,39 +41,41 @@ class TrackDownloadManager @Inject constructor(
             return@withContext Result.success(Unit)
         }
         _downloadingIds.update { it + track.id }
+        var tempFile: File? = null
         try {
             val quality = settingsRepository.settings.first().audioQuality
-            val streamUrl = track.streamUrl?.takeIf { it.isNotBlank() }
+            val cachedUrl = track.streamUrl?.takeIf { it.startsWith("https://", ignoreCase = true) }
+            val initialUrl = cachedUrl
                 ?: youTubeRepository.getAudioStreamUrl(track.id, quality).getOrThrow()
-
-            require(streamUrl.startsWith("https://", ignoreCase = true)) {
-                "Unsupported insecure stream URL"
-            }
 
             val safeTrackId = track.id.replace(Regex("[^A-Za-z0-9_-]"), "_")
                 .ifBlank { "track_${track.id.hashCode()}" }
             val dir = offlineDir
             val baseCanonical = dir.canonicalPath + File.separator
             val targetFile = File(dir, "$safeTrackId.m4a")
-            val tempFile = File(dir, "$safeTrackId.tmp")
+            tempFile = File(dir, "$safeTrackId.tmp")
             require(
                 targetFile.canonicalPath.startsWith(baseCanonical) &&
                     tempFile.canonicalPath.startsWith(baseCanonical)
             ) {
-                "Invalid offline file path"
+                "Некорректный путь сохранения трека"
             }
 
-            val request = Request.Builder().url(streamUrl).build()
-            okHttpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    throw IllegalStateException("Download failed with HTTP ${response.code}")
+            try {
+                downloadToTempFile(initialUrl, tempFile)
+            } catch (firstError: DownloadHttpException) {
+                if ((firstError.code == 403 || firstError.code == 410) && cachedUrl != null) {
+                    val freshUrl = youTubeRepository
+                        .getAudioStreamUrl(track.id, quality, forceRefresh = true)
+                        .getOrThrow()
+                    downloadToTempFile(freshUrl, tempFile)
+                } else {
+                    throw firstError
                 }
-                val body = response.body ?: throw IllegalStateException("Empty audio response")
-                body.byteStream().use { input ->
-                    tempFile.outputStream().use { output ->
-                        input.copyTo(output)
-                    }
-                }
+            }
+
+            if (!tempFile.exists() || tempFile.length() <= 0L) {
+                throw IOException("Скачанный аудиофайл пуст или повреждён")
             }
 
             if (targetFile.exists()) targetFile.delete()
@@ -80,20 +84,52 @@ class TrackDownloadManager @Inject constructor(
                 tempFile.delete()
             }
 
+            val savedSize = targetFile.length()
+            if (!targetFile.exists() || savedSize <= 0L) {
+                targetFile.delete()
+                throw IOException("Не удалось сохранить аудиофайл на устройство")
+            }
+
             libraryRepository.saveDownloadedTrack(
                 track = track,
                 filePath = targetFile.absolutePath,
-                fileSizeBytes = targetFile.length()
+                fileSizeBytes = savedSize
             )
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Result.failure(e)
+            Result.failure(IOException(FriendlyErrorMapper.map(e, "Не удалось скачать трек"), e))
         } finally {
+            if (tempFile?.exists() == true) {
+                tempFile.delete()
+            }
             _downloadingIds.update { it - track.id }
         }
     }
+
+    private fun downloadToTempFile(streamUrl: String, tempFile: File) {
+        require(streamUrl.startsWith("https://", ignoreCase = true)) {
+            "Небезопасная ссылка на аудиопоток"
+        }
+        val request = Request.Builder().url(streamUrl).build()
+        okHttpClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw DownloadHttpException(
+                    response.code,
+                    "Ошибка загрузки (HTTP ${response.code})"
+                )
+            }
+            val body = response.body ?: throw IOException("Сервер вернул пустой аудиопоток")
+            body.byteStream().use { input ->
+                tempFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+        }
+    }
+
+    private class DownloadHttpException(val code: Int, message: String) : IOException(message)
 
     suspend fun removeDownload(trackId: String) {
         libraryRepository.deleteDownloadedTrack(trackId)

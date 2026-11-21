@@ -6,6 +6,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -70,7 +72,7 @@ import com.example.ui.components.ImportYouTubePlaylistDialog
 import com.example.ui.components.SonoraIcons
 import com.example.ui.components.TrackRowItem
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun LibraryScreen(
     onOpenPlaylist: (Long) -> Unit,
@@ -87,6 +89,7 @@ fun LibraryScreen(
     var showFilterBar by rememberSaveable { mutableStateOf(false) }
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
     var showImportDialog by remember { mutableStateOf(false) }
+    var showClearHistoryConfirm by remember { mutableStateOf(false) }
     var trackForPlaylistDialog by remember { mutableStateOf<Track?>(null) }
     var playlistPendingDelete by remember { mutableStateOf<Playlist?>(null) }
 
@@ -144,6 +147,32 @@ fun LibraryScreen(
         )
     }
 
+    if (showClearHistoryConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearHistoryConfirm = false },
+            title = { Text("Очистить историю?") },
+            text = {
+                Text("Список недавно прослушанных треков на устройстве будет очищен.")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.clearHistory()
+                        showClearHistoryConfirm = false
+                        onShowMessage("История прослушивания очищена")
+                    }
+                ) {
+                    Text("Очистить")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearHistoryConfirm = false }) {
+                    Text("Отмена")
+                }
+            }
+        )
+    }
+
     trackForPlaylistDialog?.let { selectedTrack ->
         AddToPlaylistDialog(
             track = selectedTrack,
@@ -187,18 +216,20 @@ fun LibraryScreen(
     ) {
         Spacer(modifier = Modifier.height(12.dp))
 
-        Row(
+        FlowRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Text(
                 text = "Медиатека",
                 style = MaterialTheme.typography.headlineMedium,
                 color = MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.weight(1f)
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.align(Alignment.CenterVertically)
             )
 
             Row(
@@ -234,7 +265,7 @@ fun LibraryScreen(
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Импорт")
+                    Text("Импорт", maxLines = 1)
                 }
 
                 Button(
@@ -252,7 +283,7 @@ fun LibraryScreen(
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Создать")
+                    Text("Создать", maxLines = 1)
                 }
             }
         }
@@ -396,7 +427,11 @@ fun LibraryScreen(
                 },
                 bottomContentPadding = bottomContentPadding,
                 onPlayAll = { shuffle -> viewModel.playAll(filteredHistory, shuffle) },
-                onClearHistory = if (uiState.history.isNotEmpty()) viewModel::clearHistory else null,
+                onClearHistory = if (uiState.history.isNotEmpty()) {
+                    { showClearHistoryConfirm = true }
+                } else {
+                    null
+                },
                 onPlayTrack = { track -> viewModel.playTrack(track, filteredHistory) },
                 onPlayNext = { track ->
                     viewModel.playNext(track)

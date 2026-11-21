@@ -107,6 +107,8 @@ private val topLevelDestinations = listOf(
 
 @Composable
 fun SonoraNavHost(
+    pendingSearchQuery: String? = null,
+    onConsumePendingSearchQuery: () -> Unit = {},
     playerViewModel: PlayerViewModel = hiltViewModel()
 ) {
     val navController = rememberNavController()
@@ -142,6 +144,12 @@ fun SonoraNavHost(
             }
             launchSingleTop = true
             restoreState = true
+        }
+    }
+
+    LaunchedEffect(pendingSearchQuery) {
+        if (!pendingSearchQuery.isNullOrBlank()) {
+            navigateTopLevel(SonoraRoute.Search)
         }
     }
 
@@ -302,7 +310,9 @@ fun SonoraNavHost(
                             composable<SonoraRoute.Search> {
                                 SearchScreen(
                                     bottomContentPadding = contentPadding,
-                                    onShowMessage = ::showMessage
+                                    onShowMessage = ::showMessage,
+                                    pendingQuery = pendingSearchQuery,
+                                    onConsumePendingQuery = onConsumePendingSearchQuery
                                 )
                             }
 

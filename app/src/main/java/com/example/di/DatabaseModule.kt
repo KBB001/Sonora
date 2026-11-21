@@ -21,9 +21,37 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object DatabaseModule {
 
+    internal val MIGRATION_1_2 = object : Migration(1, 2) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `downloaded_tracks` (" +
+                    "`id` TEXT NOT NULL, `title` TEXT NOT NULL, `artist` TEXT NOT NULL, " +
+                    "`durationSeconds` INTEGER NOT NULL, `thumbnailUrl` TEXT NOT NULL, " +
+                    "`localFilePath` TEXT NOT NULL, `fileSizeBytes` INTEGER NOT NULL, " +
+                    "`downloadedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))"
+            )
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `search_history` (" +
+                    "`query` TEXT NOT NULL, `searchedAt` INTEGER NOT NULL, PRIMARY KEY(`query`))"
+            )
+        }
+    }
+
     internal val MIGRATION_2_3 = object : Migration(2, 3) {
         override fun migrate(db: SupportSQLiteDatabase) {
-            db.execSQL("ALTER TABLE playlists ADD COLUMN youtubePlaylistId TEXT")
+            var hasYoutubePlaylistId = false
+            db.query("PRAGMA table_info(`playlists`)").use { cursor ->
+                val nameCol = cursor.getColumnIndex("name")
+                while (cursor.moveToNext()) {
+                    if (nameCol >= 0 && cursor.getString(nameCol) == "youtubePlaylistId") {
+                        hasYoutubePlaylistId = true
+                        break
+                    }
+                }
+            }
+            if (!hasYoutubePlaylistId) {
+                db.execSQL("ALTER TABLE playlists ADD COLUMN youtubePlaylistId TEXT")
+            }
         }
     }
 
@@ -35,8 +63,7 @@ object DatabaseModule {
             SonoraDatabase::class.java,
             "sonora_music.db"
         )
-            .addMigrations(MIGRATION_2_3)
-            .fallbackToDestructiveMigration(dropAllTables = true)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
             .build()
 
     @Provides

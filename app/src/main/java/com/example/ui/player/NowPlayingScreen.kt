@@ -37,6 +37,7 @@ import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -570,12 +571,43 @@ fun NowPlayingScreen(
                             color = MaterialTheme.colorScheme.error.copy(alpha = 0.16f),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text(
-                                text = err,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
-                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 12.dp, top = 6.dp, bottom = 6.dp, end = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = err,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                IconButton(
+                                    onClick = { viewModel.togglePlayPause() },
+                                    modifier = Modifier
+                                        .minimumInteractiveComponentSize()
+                                        .testTag("player_error_retry_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Refresh,
+                                        contentDescription = "Повторить воспроизведение",
+                                        tint = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { viewModel.clearError() },
+                                    modifier = Modifier
+                                        .minimumInteractiveComponentSize()
+                                        .testTag("player_error_dismiss_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Close,
+                                        contentDescription = "Скрыть ошибку",
+                                        tint = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
                         }
                     }
 

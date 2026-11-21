@@ -3,6 +3,7 @@ package com.example.ui.search
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.core.common.FriendlyErrorMapper
 import com.example.data.local.TrackDownloadManager
 import com.example.domain.model.PlaybackState
 import com.example.domain.model.Playlist
@@ -234,7 +235,7 @@ class SearchViewModel @Inject constructor(
                     },
                     onFailure = { error ->
                         resultsFlow.value = SearchResultsState.Error(
-                            error.localizedMessage ?: "Не удалось загрузить плейлист YouTube"
+                            FriendlyErrorMapper.map(error, "Не удалось загрузить плейлист YouTube")
                         )
                     }
                 )
@@ -245,7 +246,7 @@ class SearchViewModel @Inject constructor(
                             onSuccess = { resultsFlow.value = SearchResultsState.Tracks(it) },
                             onFailure = { err ->
                                 resultsFlow.value = SearchResultsState.Error(
-                                    err.localizedMessage ?: "Ошибка поиска треков."
+                                    FriendlyErrorMapper.map(err, "Ошибка поиска треков.")
                                 )
                             }
                         )
@@ -255,7 +256,7 @@ class SearchViewModel @Inject constructor(
                             onSuccess = { resultsFlow.value = SearchResultsState.Playlists(it) },
                             onFailure = { err ->
                                 resultsFlow.value = SearchResultsState.Error(
-                                    err.localizedMessage ?: "Ошибка поиска плейлистов."
+                                    FriendlyErrorMapper.map(err, "Ошибка поиска плейлистов.")
                                 )
                             }
                         )
@@ -265,7 +266,7 @@ class SearchViewModel @Inject constructor(
                             onSuccess = { resultsFlow.value = SearchResultsState.Artists(it) },
                             onFailure = { err ->
                                 resultsFlow.value = SearchResultsState.Error(
-                                    err.localizedMessage ?: "Ошибка поиска исполнителей."
+                                    FriendlyErrorMapper.map(err, "Ошибка поиска исполнителей.")
                                 )
                             }
                         )
@@ -289,7 +290,7 @@ class SearchViewModel @Inject constructor(
                 },
                 onFailure = { err ->
                     resultsFlow.value = SearchResultsState.Error(
-                        err.localizedMessage ?: "Не удалось открыть плейлист"
+                        FriendlyErrorMapper.map(err, "Не удалось открыть плейлист")
                     )
                 }
             )
@@ -310,7 +311,7 @@ class SearchViewModel @Inject constructor(
                 },
                 onFailure = { err ->
                     resultsFlow.value = SearchResultsState.Error(
-                        err.localizedMessage ?: "Не удалось загрузить треки артиста"
+                        FriendlyErrorMapper.map(err, "Не удалось загрузить треки артиста")
                     )
                 }
             )
@@ -366,7 +367,7 @@ class SearchViewModel @Inject constructor(
             result.onSuccess { added ->
                 onNotice("Радио запущено: +$added треков")
             }.onFailure { err ->
-                onNotice(err.localizedMessage ?: "Не удалось запустить радио")
+                onNotice(FriendlyErrorMapper.map(err, "Не удалось запустить радио"))
             }
         }
     }
@@ -385,7 +386,7 @@ class SearchViewModel @Inject constructor(
                 trackDownloadManager.downloadTrack(track).onSuccess {
                     onNotice("Сохранено для офлайн-прослушивания")
                 }.onFailure { err ->
-                    onNotice(err.localizedMessage ?: "Ошибка загрузки")
+                    onNotice(FriendlyErrorMapper.map(err, "Ошибка загрузки"))
                 }
             }
         }

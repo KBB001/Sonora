@@ -1,14 +1,20 @@
 package com.example
 
 import com.example.core.common.DurationFormatter
+import com.example.core.common.FriendlyErrorMapper
 import com.example.core.common.SemverComparator
+import com.example.data.remote.LyricsRepository
 import com.example.data.remote.YouTubeMusicAccountApi
 import com.example.data.remote.YouTubeRepositoryImpl
 import kotlinx.coroutines.test.runTest
+import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
+import javax.net.ssl.SSLException
 
 class ExampleUnitTest {
     @Test
@@ -32,7 +38,7 @@ class ExampleUnitTest {
 
     @Test
     fun youtubeRepository_handlesEmptyInputGracefully() = runTest {
-        val repo = YouTubeRepositoryImpl(okhttp3.OkHttpClient())
+        val repo = YouTubeRepositoryImpl(OkHttpClient())
         val searchResult = repo.searchTracks("   ")
         assertTrue(searchResult.isSuccess)
         assertEquals(emptyList<Any>(), searchResult.getOrThrow())
@@ -80,5 +86,62 @@ class ExampleUnitTest {
         assertTrue(multiAuth.contains("SAPISIDHASH 1700000000_"))
         assertTrue(multiAuth.contains("SAPISID1PHASH 1700000000_"))
         assertTrue(multiAuth.contains("SAPISID3PHASH 1700000000_"))
+    }
+
+    @Test
+    fun friendlyErrorMapper_mapsNetworkAndPreservesRussianErrors() {
+        val fallback = "Резервное сообщение"
+        assertTrue(
+            FriendlyErrorMapper.map(UnknownHostException("Unable to resolve host"), fallback)
+                .contains("Нет подключения к интернету")
+        )
+        assertTrue(
+            FriendlyErrorMapper.map(SocketTimeoutException("timeout"), fallback)
+                .contains("Сервер долго не отвечает")
+        )
+        assertTrue(
+            FriendlyErrorMapper.map(SSLException("handshake"), fallback)
+                .contains("SSL")
+        )
+        assertTrue(
+            FriendlyErrorMapper.map(IllegalStateException("HTTP 403 Forbidden"), fallback)
+                .contains("Доступ к потоку")
+        )
+        assertTrue(
+            FriendlyErrorMapper.map(IllegalStateException("HTTP 429"), fallback)
+                .contains("Слишком много запросов")
+        )
+        assertEquals(
+            "Трек временно недоступен",
+            FriendlyErrorMapper.map(IllegalStateException("Трек временно недоступен"), fallback)
+        )
+        assertEquals(
+            fallback,
+            FriendlyErrorMapper.map(NullPointerException("java.lang.NullPointerException"), fallback)
+        )
+    }
+
+    @Test
+    fun lyricsRepository_parsesMultiTimestampLrcAndHandlesBlankTitle() = runTest {
+        val repo = LyricsRepository(OkHttpClient())
+        val lrc = """
+            [ti:Test Song]
+            [00:12.00][00:45.5]Chorus line
+            [00:20.123]Verse line
+            [00:30.00]
+        """.trimIndent()
+
+        val lines = repo.parseLrcLines(lrc)
+        assertEquals(3, lines.size)
+        assertEquals(12_000L, lines[0].timeMs)
+        assertEquals("Chorus line", lines[0].text)
+        assertEquals(20_123L, lines[1].timeMs)
+        assertEquals("Verse line", lines[1].text)
+        assertEquals(45_500L, lines[2].timeMs)
+        assertEquals("Chorus line", lines[2].text)
+
+        val blankResult = repo.fetchLyrics("   ", "Artist", 180L)
+        assertTrue(blankResult.isFailure)
+        assertEquals("Текст песни не найден", blankResult.exceptionOrNull()?.message)
     }
 }

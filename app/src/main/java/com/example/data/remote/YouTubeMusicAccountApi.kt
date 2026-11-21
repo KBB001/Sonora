@@ -211,7 +211,7 @@ class YouTubeMusicAccountApi @Inject constructor(
                 authUserIndex = account.authUserIndex,
                 payload = payload
             )
-            val createdId = json.optString("playlistId").trim()
+            val createdId = json.optNonNullString("playlistId")
             if (createdId.isBlank()) {
                 throw IOException("YouTube не вернул ID созданного плейлиста")
             }
@@ -290,7 +290,7 @@ class YouTubeMusicAccountApi @Inject constructor(
                 payload = payload,
                 useWebClient = true
             )
-            val status = json.optJSONObject("playabilityStatus")?.optString("status")
+            val status = json.optJSONObject("playabilityStatus")?.optNonNullString("status")
             if (status != "OK") return@runCatching null
             val adaptive = json.optJSONObject("streamingData")?.optJSONArray("adaptiveFormats")
                 ?: return@runCatching null
@@ -486,7 +486,7 @@ class YouTubeMusicAccountApi @Inject constructor(
                     )
                 }
                 val detail = runCatching {
-                    JSONObject(raw).optJSONObject("error")?.optString("message").orEmpty()
+                    JSONObject(raw).optJSONObject("error")?.optNonNullString("message").orEmpty()
                 }.getOrDefault("")
                 val msg = if (detail.isNotBlank()) {
                     "Ошибка YouTube API (${response.code}): $detail"
@@ -506,9 +506,9 @@ class YouTubeMusicAccountApi @Inject constructor(
         val candidates = mutableListOf<Triple<String, String, Long>>()
         for (i in 0 until array.length()) {
             val item = array.optJSONObject(i) ?: continue
-            val mime = item.optString("mimeType")
-            val url = item.optString("url")
-            if (url.isBlank() || !mime.startsWith("audio/")) continue
+            val mime = item.optNonNullString("mimeType")
+            val url = item.optNonNullString("url")
+            if (!url.startsWith("https://", ignoreCase = true) || !mime.startsWith("audio/")) continue
             val bitrate = item.optLong("bitrate", 0L)
             candidates += Triple(url, mime, bitrate)
         }
@@ -699,11 +699,11 @@ class YouTubeMusicAccountApi @Inject constructor(
             twoRowItems.forEach { item ->
                 val browseId = item.optJSONObject("navigationEndpoint")
                     ?.optJSONObject("browseEndpoint")
-                    ?.optString("browseId")
+                    ?.optNonNullString("browseId")
                     .orEmpty()
                 if (browseId.startsWith("VL") && browseId != "VLLM" && browseId != "VLSE") {
                     val playlistId = browseId.removePrefix("VL")
-                    val title = readRunsText(item.optJSONObject("title")).ifBlank { "YouTube Playlist" }
+                    val title = readRunsText(item.optJSONObject("title")).ifBlank { "Плейлист YouTube" }
                     val subtitle = readRunsText(item.optJSONObject("subtitle"))
                     val count = Regex("(\\d+)").find(subtitle)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
                     val thumb = item.optJSONObject("thumbnailRenderer")
@@ -731,7 +731,7 @@ class YouTubeMusicAccountApi @Inject constructor(
             listItems.forEach { item ->
                 val browseId = item.optJSONObject("navigationEndpoint")
                     ?.optJSONObject("browseEndpoint")
-                    ?.optString("browseId")
+                    ?.optNonNullString("browseId")
                     .orEmpty()
                 if (browseId.startsWith("VL") && browseId != "VLLM" && browseId != "VLSE") {
                     val playlistId = browseId.removePrefix("VL")
@@ -741,7 +741,7 @@ class YouTubeMusicAccountApi @Inject constructor(
                         ?.optJSONObject("text")
                         ?.let { readRunsText(it) }
                         .orEmpty()
-                        .ifBlank { "YouTube Playlist" }
+                        .ifBlank { "Плейлист YouTube" }
                     val thumb = item.optJSONObject("thumbnail")
                         ?.optJSONObject("musicThumbnailRenderer")
                         ?.optJSONObject("thumbnail")
@@ -766,7 +766,7 @@ class YouTubeMusicAccountApi @Inject constructor(
 
         private fun parseResponsiveListItemTrack(item: JSONObject): Track? {
             val videoId = item.optJSONObject("playlistItemData")
-                ?.optString("videoId")
+                ?.optNonNullString("videoId")
                 ?.takeIf { it.isNotBlank() }
                 ?: item.optJSONObject("overlay")
                     ?.optJSONObject("musicItemThumbnailOverlayRenderer")
@@ -774,7 +774,7 @@ class YouTubeMusicAccountApi @Inject constructor(
                     ?.optJSONObject("musicPlayButtonRenderer")
                     ?.optJSONObject("playNavigationEndpoint")
                     ?.optJSONObject("watchEndpoint")
-                    ?.optString("videoId")
+                    ?.optNonNullString("videoId")
                     ?.takeIf { it.isNotBlank() }
                 ?: findFirstStringByKey(item, "videoId")
                 ?: return null
@@ -838,7 +838,7 @@ class YouTubeMusicAccountApi @Inject constructor(
         private fun parseTwoRowTrack(item: JSONObject): Track? {
             val videoId = item.optJSONObject("navigationEndpoint")
                 ?.optJSONObject("watchEndpoint")
-                ?.optString("videoId")
+                ?.optNonNullString("videoId")
                 ?.takeIf { it.isNotBlank() }
                 ?: return null
             val title = readRunsText(item.optJSONObject("title")).ifBlank { return null }
@@ -847,7 +847,7 @@ class YouTubeMusicAccountApi @Inject constructor(
                 .firstOrNull()
                 ?.trim()
                 .orEmpty()
-                .ifBlank { "YouTube Artist" }
+                .ifBlank { "Исполнитель YouTube" }
             val thumb = item.optJSONObject("thumbnailRenderer")
                 ?.optJSONObject("musicThumbnailRenderer")
                 ?.optJSONObject("thumbnail")
@@ -866,11 +866,11 @@ class YouTubeMusicAccountApi @Inject constructor(
         }
 
         private fun parsePlaylistVideoRenderer(item: JSONObject): Track? {
-            val videoId = item.optString("videoId").takeIf { it.isNotBlank() } ?: return null
+            val videoId = item.optNonNullString("videoId").takeIf { it.isNotBlank() } ?: return null
             val title = readRunsText(item.optJSONObject("title")).ifBlank { return null }
             val artist = readRunsText(item.optJSONObject("shortBylineText"))
-                .ifBlank { "YouTube Artist" }
-            val durationSeconds = item.optString("lengthSeconds").toLongOrNull()
+                .ifBlank { "Исполнитель YouTube" }
+            val durationSeconds = item.optNonNullString("lengthSeconds").toLongOrNull()
                 ?: parseDurationSeconds(readRunsText(item.optJSONObject("lengthText")))
             val thumb = item.optJSONObject("thumbnail")
                 ?.optJSONArray("thumbnails")
@@ -888,7 +888,7 @@ class YouTubeMusicAccountApi @Inject constructor(
 
         fun extractNextContinuation(root: JSONObject): String? {
             findFirstObjectByKey(root, "nextContinuationData")
-                ?.optString("continuation")
+                ?.optNonNullString("continuation")
                 ?.takeIf { it.isNotBlank() }
                 ?.let { return it }
 
@@ -897,7 +897,7 @@ class YouTubeMusicAccountApi @Inject constructor(
             for (renderer in contRenderers) {
                 val token = renderer.optJSONObject("continuationEndpoint")
                     ?.optJSONObject("continuationCommand")
-                    ?.optString("token")
+                    ?.optNonNullString("token")
                     ?.takeIf { it.isNotBlank() }
                 if (token != null) return token
             }
@@ -917,65 +917,86 @@ class YouTubeMusicAccountApi @Inject constructor(
 
         private fun readRunsText(obj: JSONObject?): String {
             if (obj == null) return ""
-            obj.optString("simpleText").takeIf { it.isNotBlank() }?.let { return it }
+            obj.optNonNullString("simpleText").takeIf { it.isNotBlank() }?.let { return it }
             val runs = obj.optJSONArray("runs") ?: return ""
             val sb = StringBuilder()
             for (i in 0 until runs.length()) {
-                sb.append(runs.optJSONObject(i)?.optString("text").orEmpty())
+                val run = runs.optJSONObject(i) ?: continue
+                if (!run.isNull("text")) {
+                    sb.append(run.optString("text", ""))
+                }
             }
             return sb.toString().trim()
         }
 
-        private fun pickLargestThumbnailUrl(array: JSONArray): String {
+        private fun JSONObject.optNonNullString(key: String): String {
+            if (isNull(key)) return ""
+            val raw = optString(key, "").trim()
+            return if (raw.equals("null", ignoreCase = true)) "" else raw
+        }
+
+        fun pickLargestThumbnailUrl(array: JSONArray): String {
             var bestUrl = ""
             var bestArea = -1
             for (i in 0 until array.length()) {
                 val obj = array.optJSONObject(i) ?: continue
-                val url = obj.optString("url")
-                if (url.isBlank()) continue
+                val rawUrl = obj.optNonNullString("url")
+                if (rawUrl.isBlank()) continue
+                val normalizedUrl = if (rawUrl.startsWith("//")) "https:$rawUrl" else rawUrl
+                if (!normalizedUrl.startsWith("https://", ignoreCase = true)) continue
                 val area = obj.optInt("width", 0) * obj.optInt("height", 0)
                 if (area >= bestArea) {
                     bestArea = area
-                    bestUrl = url
+                    bestUrl = normalizedUrl
                 }
             }
             return bestUrl
         }
 
-        private fun findFirstObjectByKey(node: Any?, targetKey: String): JSONObject? {
+        private fun findFirstObjectByKey(
+            node: Any?,
+            targetKey: String,
+            depth: Int = 0
+        ): JSONObject? {
+            if (depth > MAX_JSON_DEPTH) return null
             when (node) {
                 is JSONObject -> {
                     node.optJSONObject(targetKey)?.let { return it }
                     val keys = node.keys()
                     while (keys.hasNext()) {
                         val key = keys.next()
-                        findFirstObjectByKey(node.opt(key), targetKey)?.let { return it }
+                        findFirstObjectByKey(node.opt(key), targetKey, depth + 1)?.let { return it }
                     }
                 }
 
                 is JSONArray -> {
                     for (i in 0 until node.length()) {
-                        findFirstObjectByKey(node.opt(i), targetKey)?.let { return it }
+                        findFirstObjectByKey(node.opt(i), targetKey, depth + 1)?.let { return it }
                     }
                 }
             }
             return null
         }
 
-        private fun findFirstStringByKey(node: Any?, targetKey: String): String? {
+        private fun findFirstStringByKey(
+            node: Any?,
+            targetKey: String,
+            depth: Int = 0
+        ): String? {
+            if (depth > MAX_JSON_DEPTH) return null
             when (node) {
                 is JSONObject -> {
-                    node.optString(targetKey).takeIf { it.isNotBlank() }?.let { return it }
+                    node.optNonNullString(targetKey).takeIf { it.isNotBlank() }?.let { return it }
                     val keys = node.keys()
                     while (keys.hasNext()) {
                         val key = keys.next()
-                        findFirstStringByKey(node.opt(key), targetKey)?.let { return it }
+                        findFirstStringByKey(node.opt(key), targetKey, depth + 1)?.let { return it }
                     }
                 }
 
                 is JSONArray -> {
                     for (i in 0 until node.length()) {
-                        findFirstStringByKey(node.opt(i), targetKey)?.let { return it }
+                        findFirstStringByKey(node.opt(i), targetKey, depth + 1)?.let { return it }
                     }
                 }
             }
@@ -985,26 +1006,29 @@ class YouTubeMusicAccountApi @Inject constructor(
         private fun collectObjectsByKey(
             node: Any?,
             targetKey: String,
-            output: MutableList<JSONObject>
+            output: MutableList<JSONObject>,
+            depth: Int = 0
         ) {
+            if (depth > MAX_JSON_DEPTH) return
             when (node) {
                 is JSONObject -> {
                     node.optJSONObject(targetKey)?.let { output.add(it) }
                     val keys = node.keys()
                     while (keys.hasNext()) {
                         val key = keys.next()
-                        collectObjectsByKey(node.opt(key), targetKey, output)
+                        collectObjectsByKey(node.opt(key), targetKey, output, depth + 1)
                     }
                 }
 
                 is JSONArray -> {
                     for (i in 0 until node.length()) {
-                        collectObjectsByKey(node.opt(i), targetKey, output)
+                        collectObjectsByKey(node.opt(i), targetKey, output, depth + 1)
                     }
                 }
             }
         }
 
+        private const val MAX_JSON_DEPTH = 40
         private val DURATION_TEXT_REGEX = Regex("^\\d{1,2}:\\d{2}(?::\\d{2})?$")
     }
 }

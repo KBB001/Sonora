@@ -22,7 +22,9 @@ class YouTubeWriteThroughSync @Inject constructor(
         if (!accountStore.isAutoSyncEnabledSnapshot()) return
         val account = accountStore.getActiveAccountSnapshot() ?: return
         syncScope.launch {
-            api.setLikeStatus(account, trackId, isFavorite)
+            runCatching {
+                api.setLikeStatus(account, trackId, isFavorite)
+            }
         }
     }
 
@@ -35,13 +37,15 @@ class YouTubeWriteThroughSync @Inject constructor(
         if (!accountStore.isAutoSyncEnabledSnapshot()) return
         val account = accountStore.getActiveAccountSnapshot() ?: return
         syncScope.launch {
-            api.createPlaylist(
-                account = account,
-                title = name,
-                description = description,
-                videoIds = initialTracks.map { it.id }
-            ).onSuccess { remotePlaylistId ->
-                playlistDao.updateYoutubePlaylistId(localPlaylistId, remotePlaylistId)
+            runCatching {
+                api.createPlaylist(
+                    account = account,
+                    title = name,
+                    description = description,
+                    videoIds = initialTracks.map { it.id }
+                ).onSuccess { remotePlaylistId ->
+                    playlistDao.updateYoutubePlaylistId(localPlaylistId, remotePlaylistId)
+                }
             }
         }
     }
@@ -50,9 +54,11 @@ class YouTubeWriteThroughSync @Inject constructor(
         if (!accountStore.isAutoSyncEnabledSnapshot()) return
         val account = accountStore.getActiveAccountSnapshot() ?: return
         syncScope.launch {
-            val remoteId = playlistDao.getYoutubePlaylistId(localPlaylistId)
-            if (!remoteId.isNullOrBlank()) {
-                api.addTracksToPlaylist(account, remoteId, listOf(track.id))
+            runCatching {
+                val remoteId = playlistDao.getYoutubePlaylistId(localPlaylistId)
+                if (!remoteId.isNullOrBlank()) {
+                    api.addTracksToPlaylist(account, remoteId, listOf(track.id))
+                }
             }
         }
     }
@@ -61,9 +67,11 @@ class YouTubeWriteThroughSync @Inject constructor(
         if (!accountStore.isAutoSyncEnabledSnapshot()) return
         val account = accountStore.getActiveAccountSnapshot() ?: return
         syncScope.launch {
-            val remoteId = playlistDao.getYoutubePlaylistId(localPlaylistId)
-            if (!remoteId.isNullOrBlank()) {
-                api.removeTrackFromPlaylist(account, remoteId, trackId)
+            runCatching {
+                val remoteId = playlistDao.getYoutubePlaylistId(localPlaylistId)
+                if (!remoteId.isNullOrBlank()) {
+                    api.removeTrackFromPlaylist(account, remoteId, trackId)
+                }
             }
         }
     }

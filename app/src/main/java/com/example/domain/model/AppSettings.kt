@@ -1,13 +1,16 @@
 package com.example.domain.model
 
 import androidx.compose.runtime.Immutable
+import kotlinx.serialization.Serializable
 
+@Serializable
 enum class AudioQuality(val label: String, val maxBitrateKbps: Int) {
     DATA_SAVER("Data Saver (~64 kbps)", 72),
     BALANCED("Balanced (~128 kbps)", 140),
     HIGH("High Quality (Best)", Int.MAX_VALUE)
 }
 
+@Serializable
 enum class AppThemeMode(val label: String) {
     DARK("Dark (Spotify / YT Music)"),
     SYSTEM("Follow System"),

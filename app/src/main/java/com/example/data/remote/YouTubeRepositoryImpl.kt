@@ -10,7 +10,6 @@ import com.example.domain.repository.YouTubeRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -86,6 +85,7 @@ class YouTubeRepositoryImpl @Inject constructor(
                 val queryHandler = youtubeService.searchQHFactory.fromQuery(trimmed)
                 val searchInfo = SearchInfo.getInfo(youtubeService, queryHandler)
                 val tracks = searchInfo.relatedItems
+                    .orEmpty()
                     .filterIsInstance<StreamInfoItem>()
                     .filter {
                         it.streamType == StreamType.VIDEO_STREAM ||
@@ -121,16 +121,19 @@ class YouTubeRepositoryImpl @Inject constructor(
                 )
                 val searchInfo = SearchInfo.getInfo(youtubeService, queryHandler)
                 val playlists = searchInfo.relatedItems
+                    .orEmpty()
                     .filterIsInstance<PlaylistInfoItem>()
                     .map { item ->
                         YouTubePlaylistSummary(
                             url = item.url.orEmpty(),
-                            name = item.name.orEmpty().ifBlank { "YouTube Playlist" },
+                            name = item.name.orEmpty().ifBlank { "Плейлист YouTube" },
                             uploaderName = item.uploaderName.orEmpty(),
                             trackCount = item.streamCount.coerceAtLeast(0L),
-                            thumbnailUrl = item.thumbnails.maxByOrNull {
-                                it.width.coerceAtLeast(0) * it.height.coerceAtLeast(0)
-                            }?.url.orEmpty()
+                            thumbnailUrl = normalizeThumbnailUrl(
+                                item.thumbnails.orEmpty().maxByOrNull {
+                                    it.width.coerceAtLeast(0) * it.height.coerceAtLeast(0)
+                                }?.url.orEmpty()
+                            )
                         )
                     }
                     .filter { it.url.isNotBlank() }
@@ -163,15 +166,18 @@ class YouTubeRepositoryImpl @Inject constructor(
                 )
                 val searchInfo = SearchInfo.getInfo(youtubeService, queryHandler)
                 val artists = searchInfo.relatedItems
+                    .orEmpty()
                     .filterIsInstance<ChannelInfoItem>()
                     .map { item ->
                         YouTubeArtistSummary(
                             url = item.url.orEmpty(),
-                            name = item.name.orEmpty().ifBlank { "Artist" },
+                            name = item.name.orEmpty().ifBlank { "Исполнитель" },
                             subscriberCount = item.subscriberCount.coerceAtLeast(0L),
-                            thumbnailUrl = item.thumbnails.maxByOrNull {
-                                it.width.coerceAtLeast(0) * it.height.coerceAtLeast(0)
-                            }?.url.orEmpty()
+                            thumbnailUrl = normalizeThumbnailUrl(
+                                item.thumbnails.orEmpty().maxByOrNull {
+                                    it.width.coerceAtLeast(0) * it.height.coerceAtLeast(0)
+                                }?.url.orEmpty()
+                            )
                         )
                     }
                     .filter { it.url.isNotBlank() }
@@ -197,10 +203,11 @@ class YouTubeRepositoryImpl @Inject constructor(
             }
             try {
                 val channelInfo = ChannelInfo.getInfo(youtubeService, trimmed)
-                val videoTab = channelInfo.tabs.firstOrNull()
+                val videoTab = channelInfo.tabs.orEmpty().firstOrNull()
                     ?: return@withContext Result.success(emptyList())
                 val tabInfo = ChannelTabInfo.getInfo(youtubeService, videoTab)
                 val tracks = tabInfo.relatedItems
+                    .orEmpty()
                     .filterIsInstance<StreamInfoItem>()
                     .mapNotNull { it.toTrackOrNull() }
                     .distinctBy { it.id }
@@ -234,21 +241,26 @@ class YouTubeRepositoryImpl @Inject constructor(
 
     override suspend fun getAudioStreamUrl(
         videoId: String,
-        audioQuality: AudioQuality
+        audioQuality: AudioQuality,
+        forceRefresh: Boolean
     ): Result<String> = withContext(Dispatchers.IO) {
         val cleanId = extractVideoId(videoId)
         if (cleanId.isBlank()) {
-            return@withContext Result.failure(IllegalArgumentException("Invalid YouTube video ID"))
+            return@withContext Result.failure(IllegalArgumentException("Некорректный ID трека"))
         }
 
         val cacheKey = "$cleanId:${audioQuality.name}"
-        streamUrlCache.get(cacheKey)?.let { cachedUrl ->
-            return@withContext Result.success(cachedUrl)
+        if (forceRefresh) {
+            streamUrlCache.remove(cacheKey)
+        } else {
+            streamUrlCache.get(cacheKey)?.let { cachedUrl ->
+                return@withContext Result.success(cachedUrl)
+            }
         }
 
         if (isOffline()) {
             return@withContext Result.failure(
-                IOException("Offline: download tracks to listen without internet.")
+                IOException("Нет подключения к интернету. Скачайте трек для прослушивания офлайн.")
             )
         }
 
@@ -276,7 +288,7 @@ class YouTubeRepositoryImpl @Inject constructor(
         }
     }
 
-    private fun resolveAudioStreamInternal(
+    private suspend fun resolveAudioStreamInternal(
         cleanId: String,
         audioQuality: AudioQuality
     ): Result<String> {
@@ -287,6 +299,7 @@ class YouTubeRepositoryImpl @Inject constructor(
             val watchUrl = "https://www.youtube.com/watch?v=$cleanId"
             val streamInfo = StreamInfo.getInfo(youtubeService, watchUrl)
             val related = streamInfo.relatedItems
+                .orEmpty()
                 .filterIsInstance<StreamInfoItem>()
                 .filter {
                     it.streamType == StreamType.VIDEO_STREAM ||
@@ -297,7 +310,7 @@ class YouTubeRepositoryImpl @Inject constructor(
             if (related.isNotEmpty()) {
                 relatedTracksCache.put(cleanId, related)
             }
-            val bestAudioStream = selectBestAudioStream(streamInfo.audioStreams, audioQuality)
+            val bestAudioStream = selectBestAudioStream(streamInfo.audioStreams.orEmpty(), audioQuality)
             if (bestAudioStream != null) {
                 return Result.success(bestAudioStream.content)
             }
@@ -310,11 +323,12 @@ class YouTubeRepositoryImpl @Inject constructor(
         // 2. Fallback: Authenticated user session (if signed in to YouTube)
         val activeAccount = accountStore?.getActiveAccountSnapshot()
         if (activeAccount != null && youTubeMusicAccountApi != null) {
-            runBlocking {
-                youTubeMusicAccountApi.resolveAuthenticatedStreamUrl(activeAccount, cleanId, audioQuality)
-            }?.let { url ->
-                return Result.success(url)
-            }
+            youTubeMusicAccountApi
+                .resolveAuthenticatedStreamUrl(activeAccount, cleanId, audioQuality)
+                ?.takeIf { it.startsWith("https://", ignoreCase = true) }
+                ?.let { url ->
+                    return Result.success(url)
+                }
         }
 
         // 3. Fallback: Direct InnerTube alternative client profiles
@@ -336,10 +350,10 @@ class YouTubeRepositoryImpl @Inject constructor(
             rawMessage.contains("not a bot", ignoreCase = true)
         ) {
             IllegalStateException(
-                "YouTube blocked anonymous playback from this network IP. Try switching to Wi-Fi/mobile data or play a downloaded track."
+                "YouTube ограничил анонимное воспроизведение для этого IP. Попробуйте сменить сеть (Wi-Fi / мобильные данные), войти в аккаунт или включить скачанный трек."
             )
         } else {
-            primaryError ?: IllegalStateException("No playable audio stream found for $cleanId")
+            primaryError ?: IllegalStateException("Не удалось найти доступный аудиопоток")
         }
         return Result.failure(friendlyError)
     }
@@ -348,18 +362,19 @@ class YouTubeRepositoryImpl @Inject constructor(
         withContext(Dispatchers.IO) {
             val cleanId = extractVideoId(videoId)
             if (cleanId.isBlank()) {
-                return@withContext Result.failure(IllegalArgumentException("Invalid video ID"))
+                return@withContext Result.failure(IllegalArgumentException("Некорректный ID видео"))
             }
             relatedTracksCache.get(cleanId)?.let { cached ->
                 return@withContext Result.success(cached)
             }
             if (isOffline()) {
-                return@withContext Result.failure(IOException("Offline"))
+                return@withContext Result.failure(IOException("Нет подключения к интернету"))
             }
             try {
                 val watchUrl = "https://www.youtube.com/watch?v=$cleanId"
                 val streamInfo = StreamInfo.getInfo(youtubeService, watchUrl)
                 val related = streamInfo.relatedItems
+                    .orEmpty()
                     .filterIsInstance<StreamInfoItem>()
                     .filter {
                         it.streamType == StreamType.VIDEO_STREAM ||
@@ -383,7 +398,7 @@ class YouTubeRepositoryImpl @Inject constructor(
         withContext(Dispatchers.IO) {
             val trimmedUrl = playlistUrl.trim()
             if (trimmedUrl.isEmpty()) {
-                return@withContext Result.failure(IllegalArgumentException("Playlist URL cannot be empty"))
+                return@withContext Result.failure(IllegalArgumentException("Ссылка на плейлист не может быть пустой"))
             }
             playlistCache.get(trimmedUrl)?.let { cached ->
                 return@withContext Result.success(cached)
@@ -396,6 +411,7 @@ class YouTubeRepositoryImpl @Inject constructor(
                 val collected = mutableListOf<Track>()
 
                 playlistInfo.relatedItems
+                    .orEmpty()
                     .filterIsInstance<StreamInfoItem>()
                     .mapNotNullTo(collected) { it.toTrackOrNull() }
 
@@ -404,13 +420,14 @@ class YouTubeRepositoryImpl @Inject constructor(
                 while (currentPage != null && pageCount < MAX_PLAYLIST_PAGES) {
                     val moreItems = PlaylistInfo.getMoreItems(youtubeService, trimmedUrl, currentPage)
                     moreItems.items
+                        .orEmpty()
                         .filterIsInstance<StreamInfoItem>()
                         .mapNotNullTo(collected) { it.toTrackOrNull() }
                     currentPage = if (moreItems.hasNextPage()) moreItems.nextPage else null
                     pageCount++
                 }
 
-                val playlistTitle = playlistInfo.name.takeIf { it.isNotBlank() } ?: "YouTube Playlist"
+                val playlistTitle = playlistInfo.name.orEmpty().takeIf { it.isNotBlank() } ?: "Плейлист YouTube"
                 val resultPair = playlistTitle to collected.distinctBy { it.id }
                 playlistCache.put(trimmedUrl, resultPair)
                 Result.success(resultPair)
@@ -542,8 +559,8 @@ class YouTubeRepositoryImpl @Inject constructor(
         for (i in 0 until array.length()) {
             val item = array.optJSONObject(i) ?: continue
             val mime = item.optString(mimeKey)
-            val url = item.optString("url")
-            if (url.isBlank()) continue
+            val url = item.optString("url").trim()
+            if (!url.startsWith("https://", ignoreCase = true)) continue
             if (requireAudioPrefix && !mime.startsWith("audio/")) continue
             val bitrate = item.optLong("bitrate", item.optString("bitrate").toLongOrNull() ?: 0L)
             candidates += Triple(url, mime, bitrate)
@@ -564,11 +581,11 @@ class YouTubeRepositoryImpl @Inject constructor(
     ): AudioStream? {
         val validStreams = streams.filter { stream ->
             stream.isUrl &&
-                stream.content.isNotBlank() &&
+                stream.content.orEmpty().startsWith("https://", ignoreCase = true) &&
                 stream.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP
         }
         val candidates = validStreams.ifEmpty {
-            streams.filter { it.isUrl && it.content.isNotBlank() }
+            streams.filter { it.isUrl && it.content.orEmpty().startsWith("https://", ignoreCase = true) }
         }
         if (candidates.isEmpty()) return null
 
@@ -596,13 +613,13 @@ class YouTubeRepositoryImpl @Inject constructor(
     }
 
     private fun StreamInfoItem.toTrackOrNull(): Track? {
-        val videoId = extractVideoId(url)
+        val videoId = extractVideoId(url.orEmpty())
         if (videoId.isBlank()) return null
-        val bestThumbnail = selectBestThumbnail(thumbnails, videoId)
+        val bestThumbnail = selectBestThumbnail(thumbnails.orEmpty(), videoId)
         return Track(
             id = videoId,
-            title = name.orEmpty().ifBlank { "Untitled Track" },
-            artist = uploaderName.orEmpty().ifBlank { "Unknown Artist" },
+            title = name.orEmpty().ifBlank { "Без названия" },
+            artist = uploaderName.orEmpty().ifBlank { "Неизвестный исполнитель" },
             durationSeconds = duration.coerceAtLeast(0L),
             thumbnailUrl = bestThumbnail
         )
@@ -610,14 +627,24 @@ class YouTubeRepositoryImpl @Inject constructor(
 
     private fun selectBestThumbnail(thumbnails: List<Image>, videoId: String): String {
         val bestFromExtractor = thumbnails
-            .filter { it.url.isNotBlank() }
-            .maxByOrNull { image ->
+            .mapNotNull { image ->
+                val normalized = normalizeThumbnailUrl(image.url.orEmpty())
+                normalized.takeIf { it.isNotBlank() }?.let { url -> image to url }
+            }
+            .maxByOrNull { (image, _) ->
                 val width = image.width.takeIf { it > 0 } ?: 0
                 val height = image.height.takeIf { it > 0 } ?: 0
                 width * height
             }
-            ?.url
+            ?.second
         return bestFromExtractor ?: "https://i.ytimg.com/vi/$videoId/hqdefault.jpg"
+    }
+
+    private fun normalizeThumbnailUrl(rawUrl: String): String {
+        val trimmed = rawUrl.trim()
+        if (trimmed.isBlank()) return ""
+        val normalized = if (trimmed.startsWith("//")) "https:$trimmed" else trimmed
+        return if (normalized.startsWith("https://", ignoreCase = true)) normalized else ""
     }
 
     private fun extractVideoId(rawUrlOrId: String): String {
@@ -660,6 +687,11 @@ class YouTubeRepositoryImpl @Inject constructor(
         @Synchronized
         fun put(key: K, value: V) {
             map[key] = Entry(value, System.currentTimeMillis() + ttlMs)
+        }
+
+        @Synchronized
+        fun remove(key: K) {
+            map.remove(key)
         }
     }
 

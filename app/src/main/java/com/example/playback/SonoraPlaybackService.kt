@@ -6,6 +6,7 @@ import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
@@ -18,9 +19,11 @@ import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
 import com.example.MainActivity
+import com.example.domain.model.PlaybackState
 import com.example.domain.model.Track
 import com.example.domain.repository.LibraryRepository
 import com.example.domain.repository.SettingsRepository
+import com.example.domain.repository.YouTubeRepository
 import com.example.widget.SonoraWidget
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
@@ -35,6 +38,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import java.io.File
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -51,6 +55,12 @@ class SonoraPlaybackService : MediaLibraryService() {
 
     @Inject
     lateinit var equalizerManager: SonoraEqualizerManager
+
+    @Inject
+    lateinit var playbackManager: PlaybackManager
+
+    @Inject
+    lateinit var youTubeRepository: YouTubeRepository
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var mediaLibrarySession: MediaLibrarySession? = null
@@ -81,7 +91,7 @@ class SonoraPlaybackService : MediaLibraryService() {
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
-        val player = ExoPlayer.Builder(this)
+        val exoPlayer = ExoPlayer.Builder(this)
             .setMediaSourceFactory(mediaSourceFactory)
             .setLoadControl(loadControl)
             .setAudioAttributes(audioAttributes, true)
@@ -89,12 +99,14 @@ class SonoraPlaybackService : MediaLibraryService() {
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
 
+        val forwardingPlayer = SonoraForwardingPlayer(exoPlayer)
+
         serviceScope.launch {
             settingsRepository.settings
                 .map { it.skipSilenceEnabled }
                 .distinctUntilChanged()
                 .collect { skipSilence ->
-                    player.skipSilenceEnabled = skipSilence
+                    exoPlayer.skipSilenceEnabled = skipSilence
                 }
         }
 
@@ -113,22 +125,38 @@ class SonoraPlaybackService : MediaLibraryService() {
                             }
                         )
                         .build()
-                    player.trackSelectionParameters = player.trackSelectionParameters
+                    exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
                         .buildUpon()
                         .setAudioOffloadPreferences(offloadPrefs)
                         .build()
                 }
         }
 
-        player.addListener(object : Player.Listener {
+        exoPlayer.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                syncWidget(player)
+                syncWidgetFromPlayer(exoPlayer)
             }
 
             override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
-                syncWidget(player)
+                syncWidgetFromPlayer(exoPlayer)
             }
         })
+
+        serviceScope.launch {
+            playbackManager.playbackState
+                .map { state ->
+                    WidgetSnapshot(
+                        title = state.currentTrack?.title?.takeIf { it.isNotBlank() } ?: "Sonora",
+                        artist = state.currentTrack?.artist?.takeIf { it.isNotBlank() }
+                            ?: "Нажмите для воспроизведения",
+                        isPlaying = state.isPlaying
+                    )
+                }
+                .distinctUntilChanged()
+                .collect { snapshot ->
+                    pushWidgetSnapshot(snapshot)
+                }
+        }
 
         val launchIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -142,28 +170,36 @@ class SonoraPlaybackService : MediaLibraryService() {
 
         mediaLibrarySession = MediaLibrarySession.Builder(
             this,
-            player,
+            forwardingPlayer,
             SonoraLibraryCallback()
         )
             .setSessionActivity(sessionActivityPendingIntent)
             .build()
     }
 
-    private fun syncWidget(player: Player) {
+    private fun syncWidgetFromPlayer(player: Player) {
+        val state = playbackManager.playbackState.value
         val metadata = player.mediaMetadata
-        val title = metadata.title?.toString()?.takeIf { it.isNotBlank() } ?: "Sonora"
-        val artist = metadata.artist?.toString()?.takeIf { it.isNotBlank() } ?: "Ready to play"
+        val title = state.currentTrack?.title?.takeIf { it.isNotBlank() }
+            ?: metadata.title?.toString()?.takeIf { it.isNotBlank() }
+            ?: "Sonora"
+        val artist = state.currentTrack?.artist?.takeIf { it.isNotBlank() }
+            ?: metadata.artist?.toString()?.takeIf { it.isNotBlank() }
+            ?: "Нажмите для воспроизведения"
         val isPlaying = player.isPlaying
-        val snapshot = WidgetSnapshot(title = title, artist = artist, isPlaying = isPlaying)
+        pushWidgetSnapshot(WidgetSnapshot(title = title, artist = artist, isPlaying = isPlaying))
+    }
+
+    private fun pushWidgetSnapshot(snapshot: WidgetSnapshot) {
         if (snapshot == lastWidgetSnapshot) return
         lastWidgetSnapshot = snapshot
 
         serviceScope.launch(Dispatchers.IO) {
             SonoraWidget.updateAllWidgets(
                 context = this@SonoraPlaybackService,
-                title = title,
-                artist = artist,
-                isPlaying = isPlaying
+                title = snapshot.title,
+                artist = snapshot.artist,
+                isPlaying = snapshot.isPlaying
             )
         }
     }
@@ -180,6 +216,7 @@ class SonoraPlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        equalizerManager.release()
         mediaLibrarySession?.run {
             player.release()
             release()
@@ -187,6 +224,61 @@ class SonoraPlaybackService : MediaLibraryService() {
         }
         serviceScope.cancel()
         super.onDestroy()
+    }
+
+    @UnstableApi
+    private inner class SonoraForwardingPlayer(
+        private val exoPlayer: ExoPlayer
+    ) : ForwardingPlayer(exoPlayer) {
+
+        private fun hasActiveQueue(): Boolean = playbackManager.playbackState.value.queue.isNotEmpty()
+
+        override fun getAvailableCommands(): Player.Commands {
+            val base = super.getAvailableCommands()
+            if (!hasActiveQueue()) return base
+            return base.buildUpon()
+                .addAll(
+                    Player.COMMAND_PLAY_PAUSE,
+                    Player.COMMAND_PREPARE,
+                    Player.COMMAND_SEEK_TO_NEXT,
+                    Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
+                    Player.COMMAND_SEEK_TO_PREVIOUS,
+                    Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
+                    Player.COMMAND_SEEK_TO_DEFAULT_POSITION
+                )
+                .build()
+        }
+
+        override fun isCommandAvailable(command: Int): Boolean {
+            if (hasActiveQueue() && command in QUEUE_DELEGATED_COMMANDS) {
+                return true
+            }
+            return super.isCommandAvailable(command)
+        }
+
+        override fun play() {
+            if (exoPlayer.mediaItemCount == 0 && playbackManager.playbackState.value.currentTrack != null) {
+                playbackManager.togglePlayPause()
+            } else {
+                super.play()
+            }
+        }
+
+        override fun seekToNext() {
+            playbackManager.skipNext()
+        }
+
+        override fun seekToNextMediaItem() {
+            playbackManager.skipNext()
+        }
+
+        override fun seekToPrevious() {
+            playbackManager.skipPrevious()
+        }
+
+        override fun seekToPreviousMediaItem() {
+            playbackManager.skipPrevious()
+        }
     }
 
     private inner class SonoraLibraryCallback : MediaLibrarySession.Callback {
@@ -219,9 +311,9 @@ class SonoraPlaybackService : MediaLibraryService() {
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
             if (parentId == ROOT_ID) {
                 val rootChildren = listOf(
-                    browsableNode(NODE_DOWNLOADS, "Offline Downloads"),
-                    browsableNode(NODE_FAVORITES, "Liked Songs"),
-                    browsableNode(NODE_HISTORY, "Recently Played")
+                    browsableNode(NODE_DOWNLOADS, "Офлайн-загрузки"),
+                    browsableNode(NODE_FAVORITES, "Избранное"),
+                    browsableNode(NODE_HISTORY, "Недавние")
                 )
                 return Futures.immediateFuture(
                     LibraryResult.ofItemList(ImmutableList.copyOf(rootChildren), params)
@@ -246,6 +338,53 @@ class SonoraPlaybackService : MediaLibraryService() {
             return future
         }
 
+        override fun onAddMediaItems(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            mediaItems: List<MediaItem>
+        ): ListenableFuture<List<MediaItem>> {
+            val future = SettableFuture.create<List<MediaItem>>()
+            serviceScope.launch(Dispatchers.IO) {
+                runCatching {
+                    val quality = settingsRepository.settings.first().audioQuality
+                    val downloads = libraryRepository.observeDownloadedTracks().first()
+                    val favorites = libraryRepository.observeFavorites().first()
+                    val history = libraryRepository.observeHistory().first()
+                    val queue = playbackManager.playbackState.value.queue
+                    val trackById = (downloads + favorites + history + queue).associateBy { it.id }
+
+                    val resolvedItems = mediaItems.map { item ->
+                        if (item.localConfiguration?.uri != null) {
+                            item
+                        } else {
+                            val track = trackById[item.mediaId]
+                            val localPath = track?.localFilePath?.takeIf { File(it).exists() }
+                                ?: libraryRepository.getDownloadedFilePath(item.mediaId)?.takeIf { File(it).exists() }
+                            val resolvedUri = when {
+                                localPath != null -> Uri.fromFile(File(localPath))
+                                item.mediaId.isNotBlank() -> youTubeRepository
+                                    .getAudioStreamUrl(item.mediaId, quality)
+                                    .getOrNull()
+                                    ?.let { Uri.parse(it) }
+                                else -> null
+                            }
+                            if (resolvedUri != null) {
+                                item.buildUpon()
+                                    .setUri(resolvedUri)
+                                    .build()
+                            } else {
+                                item
+                            }
+                        }
+                    }
+                    future.set(resolvedItems)
+                }.onFailure {
+                    future.set(mediaItems)
+                }
+            }
+            return future
+        }
+
         private fun browsableNode(id: String, title: String): MediaItem {
             return MediaItem.Builder()
                 .setMediaId(id)
@@ -260,7 +399,8 @@ class SonoraPlaybackService : MediaLibraryService() {
         }
 
         private fun Track.toMediaItem(): MediaItem {
-            val uri = localFilePath?.let { Uri.fromFile(java.io.File(it)) }
+            val uri = localFilePath?.takeIf { File(it).exists() }?.let { Uri.fromFile(File(it)) }
+            val artworkUri = thumbnailUrl.takeIf { it.isNotBlank() }?.let { Uri.parse(it) }
             return MediaItem.Builder()
                 .setMediaId(id)
                 .apply { if (uri != null) setUri(uri) }
@@ -268,7 +408,7 @@ class SonoraPlaybackService : MediaLibraryService() {
                     MediaMetadata.Builder()
                         .setTitle(title)
                         .setArtist(artist)
-                        .setArtworkUri(Uri.parse(thumbnailUrl))
+                        .apply { if (artworkUri != null) setArtworkUri(artworkUri) }
                         .setIsBrowsable(false)
                         .setIsPlayable(true)
                         .build()
@@ -288,5 +428,14 @@ class SonoraPlaybackService : MediaLibraryService() {
         const val NODE_DOWNLOADS = "sonora_downloads"
         const val NODE_FAVORITES = "sonora_favorites"
         const val NODE_HISTORY = "sonora_history"
+        val QUEUE_DELEGATED_COMMANDS = setOf(
+            Player.COMMAND_PLAY_PAUSE,
+            Player.COMMAND_PREPARE,
+            Player.COMMAND_SEEK_TO_NEXT,
+            Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
+            Player.COMMAND_SEEK_TO_PREVIOUS,
+            Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
+            Player.COMMAND_SEEK_TO_DEFAULT_POSITION
+        )
     }
 }

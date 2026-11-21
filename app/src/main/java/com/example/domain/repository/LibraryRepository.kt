@@ -1,5 +1,7 @@
 package com.example.domain.repository
 
+import com.example.domain.model.LibraryBackup
+import com.example.domain.model.LibraryImportResult
 import com.example.domain.model.Playlist
 import com.example.domain.model.Track
 import kotlinx.coroutines.flow.Flow
@@ -48,6 +50,8 @@ interface LibraryRepository {
     suspend fun updatePlaylistYoutubeId(playlistId: Long, youtubePlaylistId: String)
     suspend fun getAllPlaylistsWithTracks(): List<Pair<Playlist, List<Track>>>
 
+    suspend fun exportLibraryBackup(): LibraryBackup
+    suspend fun importLibraryBackup(backup: LibraryBackup): LibraryImportResult
     suspend fun exportBackupJson(): String
     suspend fun importBackupJson(json: String): Result<Int>
 }

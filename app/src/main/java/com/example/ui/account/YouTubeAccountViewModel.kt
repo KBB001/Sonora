@@ -3,6 +3,7 @@ package com.example.ui.account
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.core.common.FriendlyErrorMapper
 import com.example.domain.model.AccountSyncState
 import com.example.domain.model.AccountSyncSummary
 import com.example.domain.model.YouTubeAccount
@@ -79,7 +80,7 @@ class YouTubeAccountViewModel @Inject constructor(
                     }
                 },
                 onFailure = { err ->
-                    onError(err.localizedMessage ?: "Не удалось войти в аккаунт YouTube")
+                    onError(FriendlyErrorMapper.map(err, "Не удалось войти в аккаунт YouTube"))
                 }
             )
         }
@@ -121,7 +122,7 @@ class YouTubeAccountViewModel @Inject constructor(
                     onMessage(formatSyncSummary(summary))
                 },
                 onFailure = { err ->
-                    onMessage(err.localizedMessage ?: "Ошибка синхронизации с YouTube")
+                    onMessage(FriendlyErrorMapper.map(err, "Ошибка синхронизации с YouTube"))
                 }
             )
         }
@@ -135,7 +136,7 @@ class YouTubeAccountViewModel @Inject constructor(
                     onMessage(formatSyncSummary(summary))
                 },
                 onFailure = { err ->
-                    onMessage(err.localizedMessage ?: "Ошибка объединения аккаунтов")
+                    onMessage(FriendlyErrorMapper.map(err, "Ошибка объединения аккаунтов"))
                 }
             )
         }

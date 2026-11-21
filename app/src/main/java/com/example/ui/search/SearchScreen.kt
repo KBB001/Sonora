@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -45,6 +46,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -88,11 +90,21 @@ private val QUICK_GENRE_SUGGESTIONS = listOf(
 fun SearchScreen(
     bottomContentPadding: PaddingValues,
     onShowMessage: (String) -> Unit,
+    pendingQuery: String? = null,
+    onConsumePendingQuery: () -> Unit = {},
     viewModel: SearchViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val keyboardController = LocalSoftwareKeyboardController.current
     var trackForPlaylistDialog by remember { mutableStateOf<Track?>(null) }
+
+    LaunchedEffect(pendingQuery) {
+        val q = pendingQuery?.trim()
+        if (!q.isNullOrBlank()) {
+            viewModel.submitSearch(q)
+            onConsumePendingQuery()
+        }
+    }
 
     BackHandler(enabled = uiState.canNavigateBackInResults) {
         viewModel.navigateBackInResults()
@@ -120,6 +132,7 @@ fun SearchScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
+            .imePadding()
             .padding(horizontal = 16.dp)
     ) {
         Spacer(modifier = Modifier.height(12.dp))
@@ -650,15 +663,16 @@ fun SearchScreen(
                                         .fillMaxWidth()
                                         .padding(bottom = 8.dp)
                                 ) {
-                                    Row(
+                                    Column(
                                         modifier = Modifier.padding(14.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
+                                        verticalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
-                                        Column(modifier = Modifier.weight(1f)) {
+                                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                             Text(
                                                 text = playlistTitle,
-                                                style = MaterialTheme.typography.titleMedium
+                                                style = MaterialTheme.typography.titleMedium,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis
                                             )
                                             Text(
                                                 text = "${results.items.size} треков",
@@ -666,7 +680,10 @@ fun SearchScreen(
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                         }
-                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        FlowRow(
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
                                             OutlinedButton(
                                                 onClick = {
                                                     viewModel.saveLoadedPlaylistToLibrary(

@@ -25,6 +25,9 @@ class LyricsRepository @Inject constructor(
         try {
             val cleanTitle = cleanTrackQuery(title)
             val cleanArtist = cleanArtistQuery(artist)
+            if (cleanTitle.isBlank()) {
+                return@withContext Result.failure(NoSuchElementException("Текст песни не найден"))
+            }
 
             // 1. Exact lookup via LRCLIB /api/get
             val getUrl = "https://lrclib.net/api/get".toHttpUrl().newBuilder()
@@ -53,7 +56,7 @@ class LyricsRepository @Inject constructor(
                 }
             }
 
-            Result.failure(NoSuchElementException("Lyrics not found for this track."))
+            Result.failure(NoSuchElementException("Текст песни не найден"))
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -113,24 +116,31 @@ class LyricsRepository @Inject constructor(
         return null
     }
 
-    private fun parseLrcLines(lrc: String): List<LyricLine> {
-        val regex = Regex("""\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?](.*)""")
-        return lrc.lines().mapNotNull { line ->
-            val match = regex.find(line.trim()) ?: return@mapNotNull null
-            val minutes = match.groupValues[1].toLongOrNull() ?: return@mapNotNull null
-            val seconds = match.groupValues[2].toLongOrNull() ?: return@mapNotNull null
-            val fracRaw = match.groupValues[3]
-            val millis = when (fracRaw.length) {
-                0 -> 0L
-                1 -> fracRaw.toLong() * 100L
-                2 -> fracRaw.toLong() * 10L
-                else -> fracRaw.take(3).toLong()
+    internal fun parseLrcLines(lrc: String): List<LyricLine> {
+        val timestampRegex = Regex("""\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?]""")
+        val parsed = mutableListOf<LyricLine>()
+        lrc.lineSequence().forEach { rawLine ->
+            val trimmed = rawLine.trim()
+            if (trimmed.isEmpty()) return@forEach
+            val matches = timestampRegex.findAll(trimmed).toList()
+            if (matches.isEmpty()) return@forEach
+            val cleanText = timestampRegex.replace(trimmed, "").trim()
+            if (cleanText.isEmpty()) return@forEach
+            matches.forEach { match ->
+                val minutes = match.groupValues[1].toLongOrNull() ?: return@forEach
+                val seconds = match.groupValues[2].toLongOrNull() ?: return@forEach
+                val fracRaw = match.groupValues[3]
+                val millis = when (fracRaw.length) {
+                    0 -> 0L
+                    1 -> fracRaw.toLong() * 100L
+                    2 -> fracRaw.toLong() * 10L
+                    else -> fracRaw.take(3).toLong()
+                }
+                val totalMs = minutes * 60_000L + seconds * 1_000L + millis
+                parsed += LyricLine(timeMs = totalMs, text = cleanText)
             }
-            val text = match.groupValues[4].trim()
-            if (text.isEmpty()) return@mapNotNull null
-            val totalMs = minutes * 60_000L + seconds * 1_000L + millis
-            LyricLine(timeMs = totalMs, text = text)
-        }.sortedBy { it.timeMs }
+        }
+        return parsed.sortedBy { it.timeMs }
     }
 
     private fun cleanTrackQuery(rawTitle: String): String {

@@ -21,6 +21,9 @@ interface DownloadedTrackDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertDownload(entity: DownloadedTrackEntity)
 
+    @Query("UPDATE downloaded_tracks SET localFilePath = :newPath WHERE id = :trackId")
+    suspend fun updateFilePath(trackId: String, newPath: String)
+
     @Query("DELETE FROM downloaded_tracks WHERE id = :trackId")
     suspend fun deleteDownload(trackId: String)
 }
