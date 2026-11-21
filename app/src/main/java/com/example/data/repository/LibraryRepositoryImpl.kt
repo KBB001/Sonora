@@ -297,25 +297,59 @@ class LibraryRepositoryImpl @Inject constructor(
 
     override suspend fun importBackupJson(json: String): Result<Int> = withContext(Dispatchers.IO) {
         runCatching {
+            require(json.isNotBlank() && json.length <= MAX_BACKUP_JSON_CHARS) {
+                "Файл резервной копии пустой или слишком большой"
+            }
             val backup = jsonCodec.decodeFromString<LibraryBackup>(json)
             var restoredCount = 0
-            backup.favorites.reversed().forEach { track ->
-                favoriteDao.insertFavorite(FavoriteTrackEntity.fromDomain(track))
-                restoredCount++
-            }
-            backup.history.reversed().forEach { track ->
-                historyDao.upsertHistory(HistoryTrackEntity.fromDomain(track))
-            }
-            backup.playlists.forEach { playlist ->
-                createPlaylist(
-                    name = playlist.name,
-                    description = playlist.description,
-                    initialTracks = playlist.tracks
-                )
-                restoredCount += playlist.tracks.size
-            }
+            backup.favorites
+                .filter { it.id.isNotBlank() }
+                .take(MAX_IMPORT_TRACKS)
+                .reversed()
+                .forEach { track ->
+                    favoriteDao.insertFavorite(FavoriteTrackEntity.fromDomain(sanitizeTrack(track)))
+                    restoredCount++
+                }
+            backup.history
+                .filter { it.id.isNotBlank() }
+                .take(MAX_IMPORT_TRACKS)
+                .reversed()
+                .forEach { track ->
+                    historyDao.upsertHistory(HistoryTrackEntity.fromDomain(sanitizeTrack(track)))
+                }
+            backup.playlists
+                .take(MAX_IMPORT_PLAYLISTS)
+                .forEach { playlist ->
+                    val validTracks = playlist.tracks
+                        .filter { it.id.isNotBlank() }
+                        .take(MAX_IMPORT_TRACKS)
+                        .map(::sanitizeTrack)
+                    createPlaylist(
+                        name = playlist.name.trim().take(120).ifBlank { "Untitled Playlist" },
+                        description = playlist.description.trim().take(500),
+                        initialTracks = validTracks
+                    )
+                    restoredCount += validTracks.size
+                }
             restoredCount
         }
+    }
+
+    private fun sanitizeTrack(track: Track): Track = track.copy(
+        id = track.id.trim().take(64),
+        title = track.title.trim().take(240).ifBlank { "Untitled Track" },
+        artist = track.artist.trim().take(200).ifBlank { "Unknown Artist" },
+        durationSeconds = track.durationSeconds.coerceAtLeast(0L),
+        thumbnailUrl = track.thumbnailUrl
+            .trim()
+            .takeIf { it.startsWith("https://", ignoreCase = true) }
+            .orEmpty()
+    )
+
+    private companion object {
+        const val MAX_BACKUP_JSON_CHARS = 10 * 1024 * 1024
+        const val MAX_IMPORT_TRACKS = 5_000
+        const val MAX_IMPORT_PLAYLISTS = 200
     }
 
     private fun PlaylistSummaryTuple.toDomain(): Playlist = Playlist(

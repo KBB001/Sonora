@@ -16,6 +16,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import android.os.Handler
+import android.os.Looper
+import android.webkit.CookieManager
+import android.webkit.WebStorage
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -77,12 +81,34 @@ class YouTubeAccountRepositoryImpl @Inject constructor(
     }
 
     override suspend fun removeAccount(accountId: String) {
-        accountStore.removeAccount(accountId)
+        val isEmpty = accountStore.removeAccount(accountId)
+        if (isEmpty) {
+            clearWebSessionData()
+        }
     }
 
     override suspend fun signOutAll() {
         accountStore.clearAllAccounts()
+        clearWebSessionData()
         _syncState.value = AccountSyncState.Idle
+    }
+
+    private fun clearWebSessionData() {
+        runCatching {
+            val clearAction = Runnable {
+                runCatching {
+                    val cookieManager = CookieManager.getInstance()
+                    cookieManager.removeAllCookies(null)
+                    cookieManager.flush()
+                    WebStorage.getInstance().deleteAllData()
+                }
+            }
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                clearAction.run()
+            } else {
+                Handler(Looper.getMainLooper()).post(clearAction)
+            }
+        }
     }
 
     override suspend fun setAutoSyncEnabled(enabled: Boolean) {

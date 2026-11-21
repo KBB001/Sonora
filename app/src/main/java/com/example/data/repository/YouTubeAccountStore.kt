@@ -27,7 +27,8 @@ private val Context.youtubeAccountDataStore: DataStore<Preferences> by preferenc
 
 @Singleton
 class YouTubeAccountStore @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val cipher: SecureAccountCipher
 ) {
     private val jsonCodec = Json {
         ignoreUnknownKeys = true
@@ -64,7 +65,17 @@ class YouTubeAccountStore @Inject constructor(
         storeScope.launch {
             runCatching {
                 val prefs = context.youtubeAccountDataStore.data.first()
-                val all = decodeAccounts(prefs[KEY_ACCOUNTS_JSON])
+                val rawStored = prefs[KEY_ACCOUNTS_JSON]
+                val all = decodeAccounts(rawStored)
+                // Seamlessly migrate legacy unencrypted JSON to AES-GCM ciphertext
+                if (!rawStored.isNullOrBlank() && !cipher.isEncryptedPayload(rawStored) && all.isNotEmpty()) {
+                    context.youtubeAccountDataStore.edit { mutable ->
+                        val latestRaw = mutable[KEY_ACCOUNTS_JSON]
+                        if (!latestRaw.isNullOrBlank() && !cipher.isEncryptedPayload(latestRaw)) {
+                            mutable[KEY_ACCOUNTS_JSON] = encodeAccounts(decodeAccounts(latestRaw))
+                        }
+                    }
+                }
                 val activeId = prefs[KEY_ACTIVE_ACCOUNT_ID]
                 cachedActiveAccount = all.firstOrNull { it.id == activeId } ?: all.firstOrNull()
                 cachedAutoSyncEnabled = prefs[KEY_AUTO_SYNC_ENABLED] ?: true
@@ -87,7 +98,7 @@ class YouTubeAccountStore @Inject constructor(
             } else {
                 current.add(0, account)
             }
-            prefs[KEY_ACCOUNTS_JSON] = jsonCodec.encodeToString(current)
+            prefs[KEY_ACCOUNTS_JSON] = encodeAccounts(current)
             prefs[KEY_ACTIVE_ACCOUNT_ID] = account.id
             cachedActiveAccount = account
         }
@@ -111,7 +122,7 @@ class YouTubeAccountStore @Inject constructor(
                     acc
                 }
             }
-            prefs[KEY_ACCOUNTS_JSON] = jsonCodec.encodeToString(current)
+            prefs[KEY_ACCOUNTS_JSON] = encodeAccounts(current)
             val activeId = prefs[KEY_ACTIVE_ACCOUNT_ID]
             cachedActiveAccount = current.firstOrNull { it.id == activeId } ?: current.firstOrNull()
         }
@@ -126,21 +137,26 @@ class YouTubeAccountStore @Inject constructor(
         }
     }
 
-    suspend fun removeAccount(accountId: String) {
+    suspend fun removeAccount(accountId: String): Boolean {
+        var isEmptyAfterRemoval = false
         context.youtubeAccountDataStore.edit { prefs ->
             val remaining = decodeAccounts(prefs[KEY_ACCOUNTS_JSON]).filterNot { it.id == accountId }
-            prefs[KEY_ACCOUNTS_JSON] = jsonCodec.encodeToString(remaining)
-            val currentActive = prefs[KEY_ACTIVE_ACCOUNT_ID]
-            if (currentActive == accountId || remaining.none { it.id == currentActive }) {
-                val next = remaining.firstOrNull()
-                if (next != null) {
+            isEmptyAfterRemoval = remaining.isEmpty()
+            if (remaining.isEmpty()) {
+                prefs.remove(KEY_ACCOUNTS_JSON)
+                prefs.remove(KEY_ACTIVE_ACCOUNT_ID)
+                cachedActiveAccount = null
+            } else {
+                prefs[KEY_ACCOUNTS_JSON] = encodeAccounts(remaining)
+                val currentActive = prefs[KEY_ACTIVE_ACCOUNT_ID]
+                if (currentActive == accountId || remaining.none { it.id == currentActive }) {
+                    val next = remaining.first()
                     prefs[KEY_ACTIVE_ACCOUNT_ID] = next.id
-                } else {
-                    prefs.remove(KEY_ACTIVE_ACCOUNT_ID)
+                    cachedActiveAccount = next
                 }
-                cachedActiveAccount = next
             }
         }
+        return isEmptyAfterRemoval
     }
 
     suspend fun clearAllAccounts() {
@@ -158,10 +174,20 @@ class YouTubeAccountStore @Inject constructor(
         }
     }
 
+    private fun encodeAccounts(accounts: List<YouTubeAccount>): String {
+        val rawJson = jsonCodec.encodeToString(accounts)
+        return cipher.encrypt(rawJson)
+    }
+
     private fun decodeAccounts(raw: String?): List<YouTubeAccount> {
         if (raw.isNullOrBlank()) return emptyList()
+        val plaintextJson = if (cipher.isEncryptedPayload(raw)) {
+            cipher.decrypt(raw) ?: return emptyList()
+        } else {
+            raw
+        }
         return runCatching {
-            jsonCodec.decodeFromString<List<YouTubeAccount>>(raw)
+            jsonCodec.decodeFromString<List<YouTubeAccount>>(plaintextJson)
         }.getOrDefault(emptyList())
     }
 

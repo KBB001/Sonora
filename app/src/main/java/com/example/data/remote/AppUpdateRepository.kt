@@ -132,13 +132,24 @@ class AppUpdateRepository @Inject constructor(
     }
 
     fun downloadApk(info: AppUpdateInfo): Flow<ApkDownloadEvent> = flow {
+        require(isTrustedDownloadUrl(info.downloadUrl)) {
+            "Небезопасная ссылка загрузки обновления (требуется HTTPS)"
+        }
         val dir = updatesDir
         dir.listFiles()?.forEach { old -> old.delete() }
 
         val safeName = info.assetName.replace(Regex("[^A-Za-z0-9._-]"), "_")
+            .trimStart('.')
             .ifBlank { "sonora-update.apk" }
         val tempFile = File(dir, "$safeName.part")
         val finalFile = File(dir, safeName)
+        val baseCanonical = dir.canonicalPath + File.separator
+        require(
+            tempFile.canonicalPath.startsWith(baseCanonical) &&
+                finalFile.canonicalPath.startsWith(baseCanonical)
+        ) {
+            "Недопустимый путь сохранения файла обновления"
+        }
 
         val request = Request.Builder()
             .url(info.downloadUrl)
@@ -201,7 +212,7 @@ class AppUpdateRepository @Inject constructor(
             val name = item.optString("name").trim()
             val url = item.optString("browser_download_url").trim()
             val size = item.optLong("size", -1L)
-            if (url.isBlank()) continue
+            if (url.isBlank() || !isTrustedDownloadUrl(url)) continue
             val asset = ApkAsset(name = name, downloadUrl = url, size = size)
             if (name.endsWith(".apk", ignoreCase = true)) {
                 return asset
@@ -211,5 +222,14 @@ class AppUpdateRepository @Inject constructor(
             }
         }
         return fallbackAsset
+    }
+
+    private fun isTrustedDownloadUrl(url: String): Boolean {
+        val parsed = runCatching { java.net.URI(url.trim()) }.getOrNull() ?: return false
+        if (!parsed.scheme.equals("https", ignoreCase = true)) return false
+        val host = parsed.host?.lowercase() ?: return false
+        return host == "github.com" ||
+            host.endsWith(".github.com") ||
+            host.endsWith(".githubusercontent.com")
     }
 }

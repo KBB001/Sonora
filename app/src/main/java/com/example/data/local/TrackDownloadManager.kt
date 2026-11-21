@@ -44,8 +44,22 @@ class TrackDownloadManager @Inject constructor(
             val streamUrl = track.streamUrl?.takeIf { it.isNotBlank() }
                 ?: youTubeRepository.getAudioStreamUrl(track.id, quality).getOrThrow()
 
-            val targetFile = File(offlineDir, "${track.id}.m4a")
-            val tempFile = File(offlineDir, "${track.id}.tmp")
+            require(streamUrl.startsWith("https://", ignoreCase = true)) {
+                "Unsupported insecure stream URL"
+            }
+
+            val safeTrackId = track.id.replace(Regex("[^A-Za-z0-9_-]"), "_")
+                .ifBlank { "track_${track.id.hashCode()}" }
+            val dir = offlineDir
+            val baseCanonical = dir.canonicalPath + File.separator
+            val targetFile = File(dir, "$safeTrackId.m4a")
+            val tempFile = File(dir, "$safeTrackId.tmp")
+            require(
+                targetFile.canonicalPath.startsWith(baseCanonical) &&
+                    tempFile.canonicalPath.startsWith(baseCanonical)
+            ) {
+                "Invalid offline file path"
+            }
 
             val request = Request.Builder().url(streamUrl).build()
             okHttpClient.newCall(request).execute().use { response ->

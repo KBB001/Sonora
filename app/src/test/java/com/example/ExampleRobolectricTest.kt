@@ -179,4 +179,52 @@ class ExampleRobolectricTest {
       context.deleteDatabase(dbName)
     }
   }
+
+  @Test
+  fun `secureAccountCipher encrypts credentials at rest and store roundTrips safely`() = kotlinx.coroutines.runBlocking {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val cipher = com.example.data.repository.SecureAccountCipher(context)
+    val secretCookie = "SID=secret_sid_value; SAPISID=secret_sapisid_value"
+
+    val encrypted = cipher.encrypt(secretCookie)
+    org.junit.Assert.assertTrue(cipher.isEncryptedPayload(encrypted))
+    org.junit.Assert.assertFalse(encrypted.contains("secret_sid_value"))
+    assertEquals(secretCookie, cipher.decrypt(encrypted))
+    org.junit.Assert.assertNull(cipher.decrypt("enc:v1:invalid:tampered"))
+
+    val store = com.example.data.repository.YouTubeAccountStore(context, cipher)
+    val account = com.example.domain.model.YouTubeAccount(
+      id = "yt_sec_test",
+      name = "Security Test",
+      cookieHeader = secretCookie
+    )
+    store.upsertAndActivateAccount(account)
+    val stored = store.getAllAccountsSnapshot()
+    assertEquals(1, stored.size)
+    assertEquals(secretCookie, stored.first().cookieHeader)
+    store.clearAllAccounts()
+    assertEquals(0, store.getAllAccountsSnapshot().size)
+  }
+
+  @Test
+  fun `authWebViewUrl filter restricts navigation to HTTPS Google and YouTube hosts`() {
+    org.junit.Assert.assertTrue(
+      com.example.ui.account.isAllowedAuthWebViewUrl("https://accounts.google.com/ServiceLogin")
+    )
+    org.junit.Assert.assertTrue(
+      com.example.ui.account.isAllowedAuthWebViewUrl("https://music.youtube.com/")
+    )
+    org.junit.Assert.assertFalse(
+      com.example.ui.account.isAllowedAuthWebViewUrl("http://music.youtube.com/")
+    )
+    org.junit.Assert.assertFalse(
+      com.example.ui.account.isAllowedAuthWebViewUrl("file:///etc/passwd")
+    )
+    org.junit.Assert.assertFalse(
+      com.example.ui.account.isAllowedAuthWebViewUrl("javascript:alert(1)")
+    )
+    org.junit.Assert.assertFalse(
+      com.example.ui.account.isAllowedAuthWebViewUrl("https://evil.example.com/phish")
+    )
+  }
 }

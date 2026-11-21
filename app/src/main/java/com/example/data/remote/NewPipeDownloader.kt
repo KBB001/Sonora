@@ -33,7 +33,7 @@ class NewPipeDownloader @Inject constructor(
             bytes.toRequestBody(contentType.toMediaTypeOrNull())
         }
 
-        val activeAccount = if (isYouTubeHost(url)) accountStore.getActiveAccountSnapshot() else null
+        val activeAccount = if (isSecureYouTubeUrl(url)) accountStore.getActiveAccountSnapshot() else null
 
         val okHttpHeaders = buildMap {
             put("User-Agent", USER_AGENT)
@@ -43,16 +43,13 @@ class NewPipeDownloader @Inject constructor(
                 }
             }
             if (activeAccount != null && activeAccount.cookieHeader.isNotBlank()) {
-                put("Cookie", activeAccount.cookieHeader)
-                put("X-Goog-AuthUser", activeAccount.authUserIndex.toString())
-                YouTubeMusicAccountApi.extractSapisid(activeAccount.cookieHeader)?.let { sapisid ->
-                    put(
-                        "Authorization",
-                        YouTubeMusicAccountApi.buildSapisidHashHeader(
-                            sapisid = sapisid,
-                            origin = YouTubeMusicAccountApi.YOUTUBE_WEB_ORIGIN
-                        )
-                    )
+                put("Cookie", YouTubeMusicAccountApi.normalizeCookieHeader(activeAccount.cookieHeader))
+                put("X-Goog-AuthUser", activeAccount.authUserIndex.coerceAtLeast(0).toString())
+                YouTubeMusicAccountApi.buildSapisidAuthorizationHeader(
+                    cookieHeader = activeAccount.cookieHeader,
+                    origin = YouTubeMusicAccountApi.YOUTUBE_WEB_ORIGIN
+                )?.let { authHeader ->
+                    put("Authorization", authHeader)
                     put("X-Origin", YouTubeMusicAccountApi.YOUTUBE_WEB_ORIGIN)
                 }
             }
@@ -85,12 +82,13 @@ class NewPipeDownloader @Inject constructor(
         }
     }
 
-    private fun isYouTubeHost(url: String): Boolean {
-        val host = runCatching { URI(url).host?.lowercase() }.getOrNull() ?: return false
+    private fun isSecureYouTubeUrl(url: String): Boolean {
+        val uri = runCatching { URI(url) }.getOrNull() ?: return false
+        if (!uri.scheme.equals("https", ignoreCase = true)) return false
+        val host = uri.host?.lowercase() ?: return false
         return host == "youtube.com" ||
             host.endsWith(".youtube.com") ||
-            host == "youtubei.googleapis.com" ||
-            host == "youtu.be"
+            host == "youtubei.googleapis.com"
     }
 
     private companion object {

@@ -458,6 +458,7 @@ class YouTubeMusicAccountApi @Inject constructor(
             .header("User-Agent", DESKTOP_USER_AGENT)
             .header("Content-Type", "application/json")
             .header("Accept", "*/*")
+            .header("Cache-Control", "no-store")
             .header("Cookie", normalizeCookieHeader(cookieHeader))
             .header("Authorization", authHeader)
             .header("Origin", origin)

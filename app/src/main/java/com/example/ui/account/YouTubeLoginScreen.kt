@@ -9,6 +9,7 @@ import android.webkit.CookieManager
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
@@ -60,6 +61,25 @@ import org.json.JSONObject
 
 private const val YOUTUBE_LOGIN_URL =
     "https://accounts.google.com/ServiceLogin?service=youtube&uilel=3&passive=true&continue=https%3A%2F%2Fmusic.youtube.com%2F&hl=ru"
+
+internal fun isAllowedAuthWebViewUrl(rawUrl: String?): Boolean {
+    if (rawUrl.isNullOrBlank()) return false
+    val uri = runCatching { android.net.Uri.parse(rawUrl) }.getOrNull() ?: return false
+    if (!uri.scheme.equals("https", ignoreCase = true)) return false
+    val host = uri.host?.lowercase() ?: return false
+    return host == "google.com" ||
+        host.endsWith(".google.com") ||
+        host == "youtube.com" ||
+        host.endsWith(".youtube.com") ||
+        host.endsWith(".gstatic.com") ||
+        host.endsWith(".googleusercontent.com") ||
+        host.endsWith(".googleapis.com")
+}
+
+private fun displayHostOnly(rawUrl: String): String {
+    val host = runCatching { android.net.Uri.parse(rawUrl).host }.getOrNull()
+    return host?.takeIf { it.isNotBlank() } ?: "Защищённый вход YouTube"
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -206,7 +226,7 @@ fun YouTubeLoginScreen(
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = currentUrl,
+                        text = displayHostOnly(currentUrl),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -268,6 +288,14 @@ fun YouTubeLoginScreen(
                             cookieManager.setAcceptThirdPartyCookies(this, true)
                             settings.javaScriptEnabled = true
                             settings.domStorageEnabled = true
+                            settings.allowFileAccess = false
+                            settings.allowContentAccess = false
+                            @Suppress("DEPRECATION")
+                            settings.allowFileAccessFromFileURLs = false
+                            @Suppress("DEPRECATION")
+                            settings.allowUniversalAccessFromFileURLs = false
+                            settings.setGeolocationEnabled(false)
+                            settings.setSupportMultipleWindows(false)
                             settings.useWideViewPort = true
                             settings.loadWithOverviewMode = true
                             webChromeClient = object : WebChromeClient() {
@@ -281,6 +309,9 @@ fun YouTubeLoginScreen(
                                     request: WebResourceRequest?
                                 ): Boolean {
                                     val nextUrl = request?.url?.toString().orEmpty()
+                                    if (!isAllowedAuthWebViewUrl(nextUrl)) {
+                                        return true
+                                    }
                                     currentUrl = nextUrl
                                     return false
                                 }
@@ -380,6 +411,9 @@ fun YouTubeLoginScreen(
                     onClick = {
                         CookieManager.getInstance().removeAllCookies(null)
                         CookieManager.getInstance().flush()
+                        runCatching { WebStorage.getInstance().deleteAllData() }
+                        webViewRef?.clearCache(true)
+                        webViewRef?.clearHistory()
                         hasCapturedLogin = false
                         webViewRef?.loadUrl(YOUTUBE_LOGIN_URL)
                     },

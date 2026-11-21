@@ -87,17 +87,18 @@ jobs:
             echo "using_fallback=false" >> "$GITHUB_OUTPUT"
             echo "Decoded release keystore from KEYSTORE_BASE64 secret."
           else
-            echo "::warning::KEYSTORE_BASE64 secret is not configured. Generating a temporary CI release keystore so the APK builds successfully. Configure KEYSTORE_BASE64, KEYSTORE_PASSWORD, and KEY_PASSWORD in Repository Secrets for consistent OTA update signatures."
+            echo "::notice::KEYSTORE_BASE64 secret is not configured. Reusing the persistent repository keystore certificate so all CI releases share a consistent OTA update signature."
             rm -f "$KEYSTORE_FILE"
-            keytool -genkeypair -noprompt \
-              -keystore "$KEYSTORE_FILE" \
-              -alias upload \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
-              -storepass "sonora-ci-release" \
-              -keypass "sonora-ci-release" \
-              -dname "CN=Sonora CI, OU=Mobile, O=Sonora, L=Unknown, ST=Unknown, C=US"
+            keytool -importkeystore -noprompt \
+              -srckeystore debug.keystore \
+              -srcstorepass android \
+              -srcalias androiddebugkey \
+              -srckeypass android \
+              -destkeystore "$KEYSTORE_FILE" \
+              -deststoretype PKCS12 \
+              -deststorepass "sonora-ci-release" \
+              -destalias upload \
+              -destkeypass "sonora-ci-release"
             echo "using_fallback=true" >> "$GITHUB_OUTPUT"
           fi
 

@@ -42,6 +42,13 @@ object ApkInstaller {
         }
     }
 
+    fun createAppDetailsSettingsIntent(context: Context): Intent {
+        return Intent(
+            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            Uri.parse("package:${context.packageName}")
+        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+
     fun checkInstallCompatibility(context: Context, apkFile: File): ApkInstallCompatibility {
         return runCatching {
             val pm = context.packageManager
@@ -102,7 +109,10 @@ object ApkInstaller {
 
     fun saveApkToDownloads(context: Context, apkFile: File, displayName: String = apkFile.name): Result<String> {
         return runCatching {
-            val safeFileName = displayName.ifBlank { "sonora-update.apk" }
+            val safeFileName = displayName
+                .replace(Regex("[^A-Za-z0-9._-]"), "_")
+                .trimStart('.')
+                .ifBlank { "sonora-update.apk" }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val values = ContentValues().apply {
                     put(MediaStore.Downloads.DISPLAY_NAME, safeFileName)
@@ -120,6 +130,9 @@ object ApkInstaller {
                 val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
                 downloadsDir.mkdirs()
                 val target = File(downloadsDir, safeFileName)
+                require(target.canonicalPath.startsWith(downloadsDir.canonicalPath + File.separator)) {
+                    "Недопустимое имя файла"
+                }
                 apkFile.copyTo(target, overwrite = true)
             }
             safeFileName
