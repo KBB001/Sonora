@@ -64,6 +64,9 @@ interface PlaylistDao {
     @Query("UPDATE playlists SET youtubePlaylistId = :youtubePlaylistId WHERE id = :playlistId")
     suspend fun updateYoutubePlaylistId(playlistId: Long, youtubePlaylistId: String)
 
+    @Query("UPDATE playlists SET name = :name, description = :description WHERE id = :playlistId")
+    suspend fun updatePlaylistDetails(playlistId: Long, name: String, description: String)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPlaylist(playlist: PlaylistEntity): Long
 

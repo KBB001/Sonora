@@ -128,7 +128,7 @@ class PlayerViewModel @Inject constructor(
                 },
                 onFailure = { err ->
                     lyricsFlow.value = LyricsUiState.Error(
-                        err.localizedMessage ?: "Lyrics unavailable for this track."
+                        err.localizedMessage ?: "Текст песни недоступен."
                     )
                 }
             )
@@ -147,6 +147,8 @@ class PlayerViewModel @Inject constructor(
 
     fun cycleRepeatMode() = playbackManager.cycleRepeatMode()
 
+    fun setPlaybackSpeed(speed: Float) = playbackManager.setPlaybackSpeed(speed)
+
     fun playFromQueue(track: Track) {
         playbackManager.playTrack(track, uiState.value.playbackState.queue)
     }
@@ -157,6 +159,22 @@ class PlayerViewModel @Inject constructor(
 
     fun removeFromQueue(index: Int) {
         playbackManager.removeFromQueue(index)
+    }
+
+    fun shuffleUpcomingQueue() = playbackManager.shuffleUpcomingQueue()
+
+    fun clearUpcomingQueue() = playbackManager.clearUpcomingQueue()
+
+    fun startRadioFromCurrentTrack(onNotice: (String) -> Unit) {
+        val track = uiState.value.playbackState.currentTrack ?: return
+        onNotice("Подбираем радио по треку...")
+        playbackManager.startTrackRadio(track) { result ->
+            result.onSuccess { added ->
+                onNotice("Радио запущено: добавлено $added треков")
+            }.onFailure { err ->
+                onNotice(err.localizedMessage ?: "Не удалось запустить радио")
+            }
+        }
     }
 
     fun startSleepTimer(minutes: Int) = playbackManager.startSleepTimer(minutes)
@@ -180,13 +198,13 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch {
             if (track.id in uiState.value.downloadedIds) {
                 trackDownloadManager.removeDownload(track.id)
-                onNotice("Removed offline copy")
+                onNotice("Офлайн-копия удалена")
             } else {
-                onNotice("Downloading \"${track.title}\"...")
+                onNotice("Загрузка «${track.title}»...")
                 trackDownloadManager.downloadTrack(track).onSuccess {
-                    onNotice("Saved for offline playback")
+                    onNotice("Сохранено для офлайн-прослушивания")
                 }.onFailure { err ->
-                    onNotice(err.localizedMessage ?: "Download failed")
+                    onNotice(err.localizedMessage ?: "Ошибка загрузки")
                 }
             }
         }

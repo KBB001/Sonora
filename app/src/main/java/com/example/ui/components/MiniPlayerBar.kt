@@ -120,7 +120,7 @@ fun MiniPlayerBar(
                             )
                             Text(
                                 text = if (playbackState.isLoadingStream) {
-                                    "Resolving audio stream..."
+                                    "Подключение потока..."
                                 } else {
                                     track.artist
                                 },
@@ -159,7 +159,7 @@ fun MiniPlayerBar(
                                     } else {
                                         Icons.Rounded.PlayArrow
                                     },
-                                    contentDescription = if (playbackState.isPlaying) "Pause" else "Play",
+                                    contentDescription = if (playbackState.isPlaying) "Пауза" else "Воспроизвести",
                                     tint = MaterialTheme.colorScheme.onSurface
                                 )
                             }
@@ -173,7 +173,7 @@ fun MiniPlayerBar(
                         ) {
                             Icon(
                                 imageVector = SonoraIcons.SkipNext,
-                                contentDescription = "Skip next",
+                                contentDescription = "Следующий трек",
                                 tint = MaterialTheme.colorScheme.onSurface
                             )
                         }

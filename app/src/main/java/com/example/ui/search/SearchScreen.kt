@@ -1,5 +1,6 @@
 package com.example.ui.search
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -23,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
@@ -70,14 +72,15 @@ import com.example.domain.model.Track
 import com.example.ui.components.AddToPlaylistDialog
 import com.example.ui.components.SonoraIcons
 import com.example.ui.components.TrackRowItem
+import java.util.Locale
 
 private val QUICK_GENRE_SUGGESTIONS = listOf(
-    "Lofi hip hop radio",
+    "Lo-Fi радио",
     "Hans Zimmer soundtrack",
+    "Synthwave",
+    "Акустический инди",
     "Daft Punk",
-    "Indie acoustic",
-    "Cyberpunk synthwave",
-    "Jazz piano live"
+    "Джаз пиано"
 )
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -91,6 +94,10 @@ fun SearchScreen(
     val keyboardController = LocalSoftwareKeyboardController.current
     var trackForPlaylistDialog by remember { mutableStateOf<Track?>(null) }
 
+    BackHandler(enabled = uiState.canNavigateBackInResults) {
+        viewModel.navigateBackInResults()
+    }
+
     trackForPlaylistDialog?.let { selectedTrack ->
         AddToPlaylistDialog(
             track = selectedTrack,
@@ -98,10 +105,12 @@ fun SearchScreen(
             onDismiss = { trackForPlaylistDialog = null },
             onSelectPlaylist = { playlistId ->
                 viewModel.addTrackToPlaylist(playlistId, selectedTrack)
+                onShowMessage("Трек добавлен в плейлист")
                 trackForPlaylistDialog = null
             },
             onCreateNewPlaylistAndAdd = { name ->
                 viewModel.createPlaylistAndAddTrack(name, selectedTrack)
+                onShowMessage("Плейлист «$name» создан")
                 trackForPlaylistDialog = null
             }
         )
@@ -116,7 +125,7 @@ fun SearchScreen(
         Spacer(modifier = Modifier.height(12.dp))
 
         Text(
-            text = "Search",
+            text = "Поиск",
             style = MaterialTheme.typography.headlineMedium,
             color = MaterialTheme.colorScheme.onBackground
         )
@@ -135,7 +144,7 @@ fun SearchScreen(
             leadingIcon = {
                 Icon(
                     imageVector = Icons.Rounded.Search,
-                    contentDescription = "Search icon",
+                    contentDescription = "Иконка поиска",
                     tint = MaterialTheme.colorScheme.primary
                 )
             },
@@ -147,7 +156,7 @@ fun SearchScreen(
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.Close,
-                            contentDescription = "Clear search"
+                            contentDescription = "Очистить поиск"
                         )
                     }
                 }
@@ -174,7 +183,6 @@ fun SearchScreen(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Filter Chips: Tracks / Playlists / Artists
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxWidth()
@@ -193,7 +201,28 @@ fun SearchScreen(
             }
         }
 
-        // Autocomplete Suggestions from YouTube
+        if (uiState.canNavigateBackInResults) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(
+                    onClick = { viewModel.navigateBackInResults() },
+                    modifier = Modifier.testTag("search_back_to_results_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("К результатам поиска")
+                }
+            }
+        }
+
         if (uiState.suggestions.isNotEmpty() && uiState.resultsState is SearchResultsState.Idle) {
             Surface(
                 shape = RoundedCornerShape(14.dp),
@@ -234,7 +263,7 @@ fun SearchScreen(
                             ) {
                                 Icon(
                                     imageVector = SonoraIcons.NorthWest,
-                                    contentDescription = "Refine query with $suggestion",
+                                    contentDescription = "Дополнить запрос $suggestion",
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(16.dp)
                                 )
@@ -256,11 +285,10 @@ fun SearchScreen(
                     ),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // Instant local/offline matches from Favorites, Downloads & History
                     if (uiState.localMatches.isNotEmpty()) {
                         item(key = "local_matches_header", contentType = "section_header") {
                             Text(
-                                text = "In Your Library",
+                                text = "В вашей медиатеке",
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -283,8 +311,9 @@ fun SearchScreen(
                                 onFavoriteClick = { viewModel.toggleFavorite(track) },
                                 onPlayNextClick = {
                                     viewModel.playNext(track)
-                                    onShowMessage("Added \"${track.title}\" to play next")
+                                    onShowMessage("«${track.title}» включится далее")
                                 },
+                                onStartRadioClick = { viewModel.startTrackRadio(track, onShowMessage) },
                                 onDownloadClick = { viewModel.toggleDownload(track, onShowMessage) },
                                 onAddToPlaylistClick = { trackForPlaylistDialog = track }
                             )
@@ -300,11 +329,11 @@ fun SearchScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        text = "Recent Searches",
+                                        text = "Недавние запросы",
                                         style = MaterialTheme.typography.titleMedium
                                     )
                                     TextButton(onClick = viewModel::clearSearchHistory) {
-                                        Text("Clear")
+                                        Text("Очистить")
                                     }
                                 }
                                 uiState.searchHistory.forEach { pastQuery ->
@@ -339,7 +368,7 @@ fun SearchScreen(
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Rounded.Close,
-                                                contentDescription = "Remove search query",
+                                                contentDescription = "Удалить запрос",
                                                 modifier = Modifier.size(16.dp)
                                             )
                                         }
@@ -352,7 +381,7 @@ fun SearchScreen(
                     item(key = "quick_genres", contentType = "quick_genres") {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             Text(
-                                text = "Quick Genres",
+                                text = "Быстрый выбор жанров",
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
@@ -435,68 +464,81 @@ fun SearchScreen(
                             textAlign = TextAlign.Center
                         )
                         Button(onClick = { viewModel.submitSearch() }) {
-                            Text("Try Again")
+                            Text("Повторить")
                         }
                     }
                 }
             }
 
             is SearchResultsState.Playlists -> {
-                val context = LocalContext.current
-                LazyColumn(
-                    contentPadding = PaddingValues(
-                        bottom = bottomContentPadding.calculateBottomPadding() + 16.dp
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    items(
-                        items = results.items,
-                        key = { it.url },
-                        contentType = { "playlist_row" }
-                    ) { playlist ->
-                        val imageRequest = remember(playlist.thumbnailUrl) {
-                            ImageRequest.Builder(context)
-                                .data(playlist.thumbnailUrl)
-                                .size(168)
-                                .crossfade(true)
-                                .build()
-                        }
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(14.dp))
-                                .clickable { viewModel.openPlaylistSummary(playlist) },
-                            color = MaterialTheme.colorScheme.surfaceContainerLow
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                if (results.items.isEmpty()) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Плейлисты не найдены.",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    val context = LocalContext.current
+                    LazyColumn(
+                        contentPadding = PaddingValues(
+                            bottom = bottomContentPadding.calculateBottomPadding() + 16.dp
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        items(
+                            items = results.items,
+                            key = { it.url },
+                            contentType = { "playlist_row" }
+                        ) { playlist ->
+                            val imageRequest = remember(playlist.thumbnailUrl) {
+                                ImageRequest.Builder(context)
+                                    .data(playlist.thumbnailUrl)
+                                    .size(168)
+                                    .crossfade(true)
+                                    .build()
+                            }
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .clickable { viewModel.openPlaylistSummary(playlist) },
+                                color = MaterialTheme.colorScheme.surfaceContainerLow
                             ) {
-                                AsyncImage(
-                                    model = imageRequest,
-                                    contentDescription = playlist.name,
-                                    placeholder = painterResource(R.drawable.img_default_cover),
-                                    error = painterResource(R.drawable.img_default_cover),
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier
-                                        .size(56.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = playlist.name,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    AsyncImage(
+                                        model = imageRequest,
+                                        contentDescription = playlist.name,
+                                        placeholder = painterResource(R.drawable.img_default_cover),
+                                        error = painterResource(R.drawable.img_default_cover),
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier
+                                            .size(56.dp)
+                                            .clip(RoundedCornerShape(10.dp))
                                     )
-                                    Text(
-                                        text = "${playlist.uploaderName} • ${playlist.trackCount} tracks",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = playlist.name,
+                                            style = MaterialTheme.typography.titleMedium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = "${playlist.uploaderName} • ${playlist.trackCount} треков",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -505,60 +547,73 @@ fun SearchScreen(
             }
 
             is SearchResultsState.Artists -> {
-                val context = LocalContext.current
-                LazyColumn(
-                    contentPadding = PaddingValues(
-                        bottom = bottomContentPadding.calculateBottomPadding() + 16.dp
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    items(
-                        items = results.items,
-                        key = { it.url },
-                        contentType = { "artist_row" }
-                    ) { artist ->
-                        val imageRequest = remember(artist.thumbnailUrl) {
-                            ImageRequest.Builder(context)
-                                .data(artist.thumbnailUrl)
-                                .size(168)
-                                .crossfade(true)
-                                .build()
-                        }
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(14.dp))
-                                .clickable { viewModel.openArtistSummary(artist) },
-                            color = MaterialTheme.colorScheme.surfaceContainerLow
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                if (results.items.isEmpty()) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Исполнители не найдены.",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    val context = LocalContext.current
+                    LazyColumn(
+                        contentPadding = PaddingValues(
+                            bottom = bottomContentPadding.calculateBottomPadding() + 16.dp
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        items(
+                            items = results.items,
+                            key = { it.url },
+                            contentType = { "artist_row" }
+                        ) { artist ->
+                            val imageRequest = remember(artist.thumbnailUrl) {
+                                ImageRequest.Builder(context)
+                                    .data(artist.thumbnailUrl)
+                                    .size(168)
+                                    .crossfade(true)
+                                    .build()
+                            }
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .clickable { viewModel.openArtistSummary(artist) },
+                                color = MaterialTheme.colorScheme.surfaceContainerLow
                             ) {
-                                AsyncImage(
-                                    model = imageRequest,
-                                    contentDescription = artist.name,
-                                    placeholder = painterResource(R.drawable.img_default_cover),
-                                    error = painterResource(R.drawable.img_default_cover),
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier
-                                        .size(56.dp)
-                                        .clip(CircleShape)
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = artist.name,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    AsyncImage(
+                                        model = imageRequest,
+                                        contentDescription = artist.name,
+                                        placeholder = painterResource(R.drawable.img_default_cover),
+                                        error = painterResource(R.drawable.img_default_cover),
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier
+                                            .size(56.dp)
+                                            .clip(CircleShape)
                                     )
-                                    if (artist.subscriberCount > 0) {
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
                                         Text(
-                                            text = "${artist.subscriberCount} subscribers",
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            text = artist.name,
+                                            style = MaterialTheme.typography.titleMedium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
+                                        if (artist.subscriberCount > 0) {
+                                            Text(
+                                                text = "${formatCompactCount(artist.subscriberCount)} подписчиков",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -574,7 +629,7 @@ fun SearchScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "No matching tracks found.",
+                            text = "Подходящие треки не найдены.",
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -606,7 +661,7 @@ fun SearchScreen(
                                                 style = MaterialTheme.typography.titleMedium
                                             )
                                             Text(
-                                                text = "${results.items.size} tracks",
+                                                text = "${results.items.size} треков",
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
@@ -627,14 +682,11 @@ fun SearchScreen(
                                                     modifier = Modifier.size(18.dp)
                                                 )
                                                 Spacer(modifier = Modifier.width(6.dp))
-                                                Text("Save")
+                                                Text("Сохранить")
                                             }
                                             Button(
                                                 onClick = {
-                                                    viewModel.playTrack(
-                                                        results.items.first(),
-                                                        results.items
-                                                    )
+                                                    viewModel.playAll(results.items, shuffle = false)
                                                 }
                                             ) {
                                                 Icon(
@@ -643,8 +695,44 @@ fun SearchScreen(
                                                     modifier = Modifier.size(18.dp)
                                                 )
                                                 Spacer(modifier = Modifier.width(4.dp))
-                                                Text("Play")
+                                                Text("Играть")
                                             }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (results.playlistTitle == null) {
+                            item(key = "tracks_actions_header", contentType = "actions_header") {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(bottom = 4.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Найдено: ${results.items.size}",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        TextButton(
+                                            onClick = { viewModel.playAll(results.items, shuffle = false) },
+                                            modifier = Modifier.testTag("search_play_all_button")
+                                        ) {
+                                            Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Всё")
+                                        }
+                                        TextButton(
+                                            onClick = { viewModel.playAll(results.items, shuffle = true) },
+                                            modifier = Modifier.testTag("search_shuffle_button")
+                                        ) {
+                                            Icon(SonoraIcons.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Перемешать")
                                         }
                                     }
                                 }
@@ -669,8 +757,9 @@ fun SearchScreen(
                                 onFavoriteClick = { viewModel.toggleFavorite(track) },
                                 onPlayNextClick = {
                                     viewModel.playNext(track)
-                                    onShowMessage("Added \"${track.title}\" to play next")
+                                    onShowMessage("«${track.title}» включится далее")
                                 },
+                                onStartRadioClick = { viewModel.startTrackRadio(track, onShowMessage) },
                                 onDownloadClick = { viewModel.toggleDownload(track, onShowMessage) },
                                 onAddToPlaylistClick = { trackForPlaylistDialog = track }
                             )
@@ -679,5 +768,13 @@ fun SearchScreen(
                 }
             }
         }
+    }
+}
+
+private fun formatCompactCount(count: Long): String {
+    return when {
+        count >= 1_000_000L -> String.format(Locale.US, "%.1f млн", count / 1_000_000f)
+        count >= 1_000L -> String.format(Locale.US, "%.0f тыс.", count / 1_000f)
+        else -> count.toString()
     }
 }

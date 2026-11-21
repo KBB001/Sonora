@@ -3,9 +3,9 @@ package com.example.domain.model
 import androidx.compose.runtime.Immutable
 
 enum class SearchFilter(val label: String) {
-    TRACKS("Tracks"),
-    PLAYLISTS("Playlists"),
-    ARTISTS("Artists")
+    TRACKS("Треки"),
+    PLAYLISTS("Плейлисты"),
+    ARTISTS("Артисты")
 }
 
 @Immutable

@@ -105,9 +105,9 @@ fun SettingsScreen(
                         stream.write(json.toByteArray(Charsets.UTF_8))
                     }
                 }.onSuccess {
-                    onShowMessage("Library backup exported")
+                    onShowMessage("Резервная копия экспортирована")
                 }.onFailure {
-                    onShowMessage("Backup export failed: ${it.localizedMessage}")
+                    onShowMessage("Ошибка экспорта: ${it.localizedMessage}")
                 }
             }
         }
@@ -416,7 +416,7 @@ fun SettingsScreen(
     ) {
         item {
             Text(
-                text = "Settings",
+                text = "Настройки",
                 style = MaterialTheme.typography.headlineMedium,
                 color = MaterialTheme.colorScheme.onBackground
             )
@@ -490,10 +490,15 @@ fun SettingsScreen(
         // Audio Quality
         item {
             SettingsSectionCard(
-                title = "Audio Quality",
+                title = "Качество звука",
                 icon = SonoraIcons.HighQuality
             ) {
                 AudioQuality.entries.forEach { quality ->
+                    val qualityLabel = when (quality) {
+                        AudioQuality.DATA_SAVER -> "Экономия трафика (~64 кбит/с)"
+                        AudioQuality.BALANCED -> "Сбалансированное (~128 кбит/с)"
+                        AudioQuality.HIGH -> "Высокое (максимальный поток)"
+                    }
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -508,7 +513,7 @@ fun SettingsScreen(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = quality.label,
+                            text = qualityLabel,
                             style = MaterialTheme.typography.bodyLarge
                         )
                     }
@@ -519,12 +524,12 @@ fun SettingsScreen(
         // Playback Features
         item {
             SettingsSectionCard(
-                title = "Playback & Audio",
+                title = "Воспроизведение и аудио",
                 icon = SonoraIcons.GraphicEq
             ) {
                 SettingsToggleRow(
-                    title = "Autoplay Radio",
-                    subtitle = "Automatically play similar tracks when queue ends",
+                    title = "Авторадио",
+                    subtitle = "Автоматически подбирать похожие треки после окончания очереди",
                     icon = SonoraIcons.AutoMode,
                     checked = uiState.settings.autoplayEnabled,
                     onCheckedChange = viewModel::setAutoplayEnabled,
@@ -532,8 +537,8 @@ fun SettingsScreen(
                 )
 
                 SettingsToggleRow(
-                    title = "Skip Silence",
-                    subtitle = "Trim silent gaps in podcasts and tracks",
+                    title = "Пропуск тишины",
+                    subtitle = "Сокращать тихие паузы в треках и подкастах",
                     icon = SonoraIcons.GraphicEq,
                     checked = uiState.settings.skipSilenceEnabled,
                     onCheckedChange = viewModel::setSkipSilenceEnabled,
@@ -551,7 +556,8 @@ fun SettingsScreen(
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.weight(1f)
                     ) {
                         Icon(
                             imageVector = SonoraIcons.Equalizer,
@@ -559,12 +565,12 @@ fun SettingsScreen(
                             tint = MaterialTheme.colorScheme.primary
                         )
                         Column {
-                            Text("Equalizer", style = MaterialTheme.typography.titleMedium)
+                            Text("Эквалайзер", style = MaterialTheme.typography.titleMedium)
                             Text(
                                 text = if (uiState.equalizerState.isAvailable) {
-                                    if (uiState.equalizerState.isEnabled) "Active" else "Tap to configure bands"
+                                    if (uiState.equalizerState.isEnabled) "Активен" else "Нажмите для настройки частот"
                                 } else {
-                                    "Start playing a track to activate equalizer"
+                                    "Включите любой трек для активации эквалайзера"
                                 },
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -572,7 +578,7 @@ fun SettingsScreen(
                         }
                     }
                     OutlinedButton(onClick = { showEqualizerSheet = true }) {
-                        Text("Open")
+                        Text("Открыть")
                     }
                 }
 
@@ -587,10 +593,10 @@ fun SettingsScreen(
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary
                     )
-                    Text("Sleep Timer", style = MaterialTheme.typography.titleMedium)
+                    Text("Таймер сна", style = MaterialTheme.typography.titleMedium)
                     uiState.playbackState.sleepTimerRemainingMs?.let { rem ->
                         Text(
-                            text = "(${DurationFormatter.formatMillis(rem)} left)",
+                            text = "(осталось ${DurationFormatter.formatMillis(rem)})",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary
                         )
@@ -601,7 +607,7 @@ fun SettingsScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    val timerOptions = listOf(0 to "Off", 15 to "15m", 30 to "30m", 45 to "45m", 60 to "60m")
+                    val timerOptions = listOf(0 to "Выкл", 15 to "15 мин", 30 to "30 мин", 45 to "45 мин", 60 to "60 мин")
                     timerOptions.forEach { (mins, label) ->
                         val active = (mins == 0 && uiState.playbackState.sleepTimerRemainingMs == null)
                         FilterChip(
@@ -609,10 +615,10 @@ fun SettingsScreen(
                             onClick = {
                                 if (mins == 0) {
                                     viewModel.cancelSleepTimer()
-                                    onShowMessage("Sleep timer cancelled")
+                                    onShowMessage("Таймер сна отменён")
                                 } else {
                                     viewModel.startSleepTimer(mins)
-                                    onShowMessage("Sleep timer set for $mins minutes")
+                                    onShowMessage("Таймер сна установлен на $mins мин")
                                 }
                             },
                             label = { Text(label) },
@@ -629,7 +635,7 @@ fun SettingsScreen(
         // Appearance
         item {
             SettingsSectionCard(
-                title = "Appearance",
+                title = "Оформление",
                 icon = SonoraIcons.Palette
             ) {
                 FlowRow(
@@ -637,18 +643,23 @@ fun SettingsScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     AppThemeMode.entries.forEach { mode ->
+                        val themeLabel = when (mode) {
+                            AppThemeMode.SYSTEM -> "Системная"
+                            AppThemeMode.DARK -> "Тёмная"
+                            AppThemeMode.LIGHT -> "Светлая"
+                        }
                         FilterChip(
                             selected = uiState.settings.themeMode == mode,
                             onClick = { viewModel.setThemeMode(mode) },
-                            label = { Text(mode.label) }
+                            label = { Text(themeLabel) }
                         )
                     }
                 }
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     SettingsToggleRow(
-                        title = "Material You Dynamic Color",
-                        subtitle = "Adapt app colors to your Android wallpaper",
+                        title = "Динамические цвета Material You",
+                        subtitle = "Адаптировать палитру под обои системы Android",
                         icon = SonoraIcons.ColorLens,
                         checked = uiState.settings.dynamicColorEnabled,
                         onCheckedChange = viewModel::setDynamicColorEnabled,
@@ -661,30 +672,30 @@ fun SettingsScreen(
         // Cache & Backup
         item {
             SettingsSectionCard(
-                title = "Storage & Backup",
+                title = "Память и резервная копия",
                 icon = SonoraIcons.CleaningServices
             ) {
-                val mb = String.format(Locale.US, "%.1f MB", uiState.cacheSizeBytes / (1024f * 1024f))
+                val mb = String.format(Locale.US, "%.1f МБ", uiState.cacheSizeBytes / (1024f * 1024f))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Audio Stream Cache", style = MaterialTheme.typography.titleMedium)
+                        Text("Кэш аудиопотоков", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            text = "$mb used for instant replay",
+                            text = "Занято $mb для быстрого повтора",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                     OutlinedButton(
                         onClick = {
-                            viewModel.clearCache { onShowMessage("Audio cache cleared") }
+                            viewModel.clearCache { onShowMessage("Кэш аудио очищен") }
                         },
                         modifier = Modifier.testTag("clear_cache_button")
                     ) {
-                        Text("Clear")
+                        Text("Очистить")
                     }
                 }
 
@@ -700,7 +711,7 @@ fun SettingsScreen(
                     ) {
                         Icon(SonoraIcons.FileUpload, contentDescription = null)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Export JSON")
+                        Text("Экспорт JSON")
                     }
                     OutlinedButton(
                         onClick = { importLauncher.launch(arrayOf("application/json", "*/*")) },
@@ -710,7 +721,7 @@ fun SettingsScreen(
                     ) {
                         Icon(SonoraIcons.FileDownload, contentDescription = null)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Restore JSON")
+                        Text("Импорт JSON")
                     }
                 }
             }
@@ -813,7 +824,7 @@ fun EqualizerSheetContent(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Audio Equalizer", style = MaterialTheme.typography.titleLarge)
+            Text("Эквалайзер", style = MaterialTheme.typography.titleLarge)
             Switch(
                 checked = state.isEnabled,
                 onCheckedChange = onToggleEnabled,
@@ -823,7 +834,7 @@ fun EqualizerSheetContent(
 
         if (!state.isAvailable) {
             Text(
-                text = "Start playing a track so ExoPlayer attaches an audio session to the equalizer.",
+                text = "Запустите любой трек, чтобы подключить аудиосессию к эквалайзеру.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

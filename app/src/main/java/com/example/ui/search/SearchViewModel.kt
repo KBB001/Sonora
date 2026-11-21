@@ -50,6 +50,7 @@ data class SearchUiState(
     val localMatches: List<Track> = emptyList(),
     val searchHistory: List<String> = emptyList(),
     val resultsState: SearchResultsState = SearchResultsState.Idle,
+    val canNavigateBackInResults: Boolean = false,
     val favoriteIds: Set<String> = emptySet(),
     val downloadedIds: Set<String> = emptySet(),
     val downloadingIds: Set<String> = emptySet(),
@@ -69,6 +70,7 @@ class SearchViewModel @Inject constructor(
     private val queryFlow = MutableStateFlow("")
     private val filterFlow = MutableStateFlow(SearchFilter.TRACKS)
     private val resultsFlow = MutableStateFlow<SearchResultsState>(SearchResultsState.Idle)
+    private val previousResultsStackFlow = MutableStateFlow<List<SearchResultsState>>(emptyList())
     private val suppressSuggestionsFlow = MutableStateFlow(false)
     private var searchJob: Job? = null
 
@@ -158,8 +160,9 @@ class SearchViewModel @Inject constructor(
     val uiState: StateFlow<SearchUiState> = combine(
         searchInputsFlow,
         resultsFlow,
+        previousResultsStackFlow,
         librarySignalsFlow
-    ) { inputs, resultsState, signals ->
+    ) { inputs, resultsState, backStack, signals ->
         SearchUiState(
             query = inputs.query,
             selectedFilter = inputs.filter,
@@ -167,6 +170,7 @@ class SearchViewModel @Inject constructor(
             localMatches = inputs.localMatches,
             searchHistory = inputs.searchHistory,
             resultsState = resultsState,
+            canNavigateBackInResults = backStack.isNotEmpty(),
             favoriteIds = signals.favoriteIds,
             downloadedIds = signals.downloadedIds,
             downloadingIds = signals.downloadingIds,
@@ -184,9 +188,10 @@ class SearchViewModel @Inject constructor(
         queryFlow.value = newQuery
         if (newQuery.isBlank()) {
             searchJob?.cancel()
+            previousResultsStackFlow.value = emptyList()
             resultsFlow.value = SearchResultsState.Idle
         } else if (resultsFlow.value !is SearchResultsState.Idle) {
-            // Return to instant local matches + suggestions when user edits the query
+            previousResultsStackFlow.value = emptyList()
             resultsFlow.value = SearchResultsState.Idle
         }
     }
@@ -194,6 +199,7 @@ class SearchViewModel @Inject constructor(
     fun fillQueryFromSuggestion(suggestion: String) {
         suppressSuggestionsFlow.value = false
         queryFlow.value = "$suggestion "
+        previousResultsStackFlow.value = emptyList()
         resultsFlow.value = SearchResultsState.Idle
     }
 
@@ -214,6 +220,7 @@ class SearchViewModel @Inject constructor(
         if (target.isEmpty()) return
 
         searchJob?.cancel()
+        previousResultsStackFlow.value = emptyList()
         searchJob = viewModelScope.launch {
             resultsFlow.value = SearchResultsState.Loading
             if (!isYouTubePlaylistUrl(target)) {
@@ -227,7 +234,7 @@ class SearchViewModel @Inject constructor(
                     },
                     onFailure = { error ->
                         resultsFlow.value = SearchResultsState.Error(
-                            error.localizedMessage ?: "Failed to load YouTube playlist"
+                            error.localizedMessage ?: "Не удалось загрузить плейлист YouTube"
                         )
                     }
                 )
@@ -238,7 +245,7 @@ class SearchViewModel @Inject constructor(
                             onSuccess = { resultsFlow.value = SearchResultsState.Tracks(it) },
                             onFailure = { err ->
                                 resultsFlow.value = SearchResultsState.Error(
-                                    err.localizedMessage ?: "Search failed."
+                                    err.localizedMessage ?: "Ошибка поиска треков."
                                 )
                             }
                         )
@@ -248,7 +255,7 @@ class SearchViewModel @Inject constructor(
                             onSuccess = { resultsFlow.value = SearchResultsState.Playlists(it) },
                             onFailure = { err ->
                                 resultsFlow.value = SearchResultsState.Error(
-                                    err.localizedMessage ?: "Playlist search failed."
+                                    err.localizedMessage ?: "Ошибка поиска плейлистов."
                                 )
                             }
                         )
@@ -258,7 +265,7 @@ class SearchViewModel @Inject constructor(
                             onSuccess = { resultsFlow.value = SearchResultsState.Artists(it) },
                             onFailure = { err ->
                                 resultsFlow.value = SearchResultsState.Error(
-                                    err.localizedMessage ?: "Artist search failed."
+                                    err.localizedMessage ?: "Ошибка поиска исполнителей."
                                 )
                             }
                         )
@@ -269,6 +276,10 @@ class SearchViewModel @Inject constructor(
     }
 
     fun openPlaylistSummary(summary: YouTubePlaylistSummary) {
+        val current = resultsFlow.value
+        if (current is SearchResultsState.Playlists || current is SearchResultsState.Artists) {
+            previousResultsStackFlow.value = previousResultsStackFlow.value + current
+        }
         searchJob?.cancel()
         searchJob = viewModelScope.launch {
             resultsFlow.value = SearchResultsState.Loading
@@ -278,7 +289,7 @@ class SearchViewModel @Inject constructor(
                 },
                 onFailure = { err ->
                     resultsFlow.value = SearchResultsState.Error(
-                        err.localizedMessage ?: "Could not open playlist"
+                        err.localizedMessage ?: "Не удалось открыть плейлист"
                     )
                 }
             )
@@ -286,6 +297,10 @@ class SearchViewModel @Inject constructor(
     }
 
     fun openArtistSummary(artist: YouTubeArtistSummary) {
+        val current = resultsFlow.value
+        if (current is SearchResultsState.Artists || current is SearchResultsState.Playlists) {
+            previousResultsStackFlow.value = previousResultsStackFlow.value + current
+        }
         searchJob?.cancel()
         searchJob = viewModelScope.launch {
             resultsFlow.value = SearchResultsState.Loading
@@ -295,11 +310,20 @@ class SearchViewModel @Inject constructor(
                 },
                 onFailure = { err ->
                     resultsFlow.value = SearchResultsState.Error(
-                        err.localizedMessage ?: "Could not load artist tracks"
+                        err.localizedMessage ?: "Не удалось загрузить треки артиста"
                     )
                 }
             )
         }
+    }
+
+    fun navigateBackInResults(): Boolean {
+        val stack = previousResultsStackFlow.value
+        if (stack.isEmpty()) return false
+        searchJob?.cancel()
+        resultsFlow.value = stack.last()
+        previousResultsStackFlow.value = stack.dropLast(1)
+        return true
     }
 
     fun deleteSearchQuery(query: String) {
@@ -315,11 +339,17 @@ class SearchViewModel @Inject constructor(
         viewModelScope.launch {
             libraryRepository.createPlaylist(
                 name = title,
-                description = "Imported from YouTube",
+                description = "Импортировано из YouTube",
                 initialTracks = tracks
             )
-            onDone("Saved \"$title\" to Library")
+            onDone("Плейлист «$title» сохранён в медиатеку")
         }
+    }
+
+    fun playAll(tracks: List<Track>, shuffle: Boolean = false) {
+        if (tracks.isEmpty()) return
+        val queue = if (shuffle) tracks.shuffled() else tracks
+        playbackManager.playTrack(queue.first(), queue)
     }
 
     fun playTrack(track: Track, queue: List<Track>) {
@@ -330,6 +360,17 @@ class SearchViewModel @Inject constructor(
         playbackManager.playNext(track)
     }
 
+    fun startTrackRadio(track: Track, onNotice: (String) -> Unit) {
+        onNotice("Подбираем радио по треку...")
+        playbackManager.startTrackRadio(track) { result ->
+            result.onSuccess { added ->
+                onNotice("Радио запущено: +$added треков")
+            }.onFailure { err ->
+                onNotice(err.localizedMessage ?: "Не удалось запустить радио")
+            }
+        }
+    }
+
     fun toggleFavorite(track: Track) {
         viewModelScope.launch { libraryRepository.toggleFavorite(track) }
     }
@@ -338,13 +379,13 @@ class SearchViewModel @Inject constructor(
         viewModelScope.launch {
             if (track.id in uiState.value.downloadedIds) {
                 trackDownloadManager.removeDownload(track.id)
-                onNotice("Removed offline copy")
+                onNotice("Офлайн-копия удалена")
             } else {
-                onNotice("Downloading \"${track.title}\"...")
+                onNotice("Загрузка «${track.title}»...")
                 trackDownloadManager.downloadTrack(track).onSuccess {
-                    onNotice("Saved for offline playback")
+                    onNotice("Сохранено для офлайн-прослушивания")
                 }.onFailure { err ->
-                    onNotice(err.localizedMessage ?: "Download failed")
+                    onNotice(err.localizedMessage ?: "Ошибка загрузки")
                 }
             }
         }

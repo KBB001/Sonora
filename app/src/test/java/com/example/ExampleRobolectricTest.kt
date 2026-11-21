@@ -227,4 +227,29 @@ class ExampleRobolectricTest {
       com.example.ui.account.isAllowedAuthWebViewUrl("https://evil.example.com/phish")
     )
   }
+
+  @Test
+  fun `playlistDao updatePlaylistDetails updates name and description and home mood query maps`() = kotlinx.coroutines.runBlocking {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val db = androidx.room.Room.inMemoryDatabaseBuilder(
+      context,
+      com.example.data.local.SonoraDatabase::class.java
+    ).allowMainThreadQueries().build()
+
+    try {
+      val id = db.playlistDao().insertPlaylist(
+        com.example.data.local.entity.PlaylistEntity(
+          name = "Old Title",
+          description = "Old Desc"
+        )
+      )
+      db.playlistDao().updatePlaylistDetails(id, "New Mix", "Updated Description")
+      val updated = db.playlistDao().findByNameIgnoreCase("New Mix")
+      assertEquals("New Mix", updated?.name)
+      assertEquals("Updated Description", updated?.description)
+      assertEquals("Lo-Fi Beats chillhop music", com.example.ui.home.HomeUiState.toSearchQuery("Lo-Fi биты"))
+    } finally {
+      db.close()
+    }
+  }
 }

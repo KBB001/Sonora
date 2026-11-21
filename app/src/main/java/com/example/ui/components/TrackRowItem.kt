@@ -55,6 +55,7 @@ fun TrackRowItem(
     onPlayClick: () -> Unit,
     onFavoriteClick: () -> Unit,
     onPlayNextClick: (() -> Unit)? = null,
+    onStartRadioClick: (() -> Unit)? = null,
     onDownloadClick: (() -> Unit)? = null,
     onAddToPlaylistClick: (() -> Unit)? = null,
     onRemoveFromPlaylistClick: (() -> Unit)? = null,
@@ -62,6 +63,7 @@ fun TrackRowItem(
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val hasMenuActions = onPlayNextClick != null ||
+        onStartRadioClick != null ||
         onDownloadClick != null ||
         onAddToPlaylistClick != null ||
         onRemoveFromPlaylistClick != null
@@ -114,7 +116,7 @@ fun TrackRowItem(
                 ) {
                     Icon(
                         imageVector = SonoraIcons.GraphicEq,
-                        contentDescription = "Now playing",
+                        contentDescription = "Сейчас играет",
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(24.dp)
                     )
@@ -148,7 +150,7 @@ fun TrackRowItem(
                 if (isDownloaded) {
                     Icon(
                         imageVector = SonoraIcons.DownloadDone,
-                        contentDescription = "Downloaded",
+                        contentDescription = "Скачано",
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(14.dp)
                     )
@@ -192,7 +194,7 @@ fun TrackRowItem(
         ) {
             Icon(
                 imageVector = if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
+                contentDescription = if (isFavorite) "Убрать из избранного" else "В избранное",
                 tint = if (isFavorite) {
                     MaterialTheme.colorScheme.primary
                 } else {
@@ -211,7 +213,7 @@ fun TrackRowItem(
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.MoreVert,
-                        contentDescription = "Track options",
+                        contentDescription = "Опции трека",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -222,7 +224,7 @@ fun TrackRowItem(
                 ) {
                     if (onPlayNextClick != null) {
                         DropdownMenuItem(
-                            text = { Text("Play next") },
+                            text = { Text("Включить далее") },
                             leadingIcon = {
                                 Icon(SonoraIcons.QueueMusic, contentDescription = null)
                             },
@@ -232,9 +234,21 @@ fun TrackRowItem(
                             }
                         )
                     }
+                    if (onStartRadioClick != null) {
+                        DropdownMenuItem(
+                            text = { Text("Запустить радио") },
+                            leadingIcon = {
+                                Icon(SonoraIcons.Radio, contentDescription = null)
+                            },
+                            onClick = {
+                                menuExpanded = false
+                                onStartRadioClick()
+                            }
+                        )
+                    }
                     if (onAddToPlaylistClick != null) {
                         DropdownMenuItem(
-                            text = { Text("Add to playlist") },
+                            text = { Text("Добавить в плейлист") },
                             leadingIcon = {
                                 Icon(SonoraIcons.PlaylistAdd, contentDescription = null)
                             },
@@ -247,7 +261,7 @@ fun TrackRowItem(
                     if (onDownloadClick != null) {
                         DropdownMenuItem(
                             text = {
-                                Text(if (isDownloaded) "Remove offline download" else "Download for offline")
+                                Text(if (isDownloaded) "Удалить офлайн-копию" else "Скачать офлайн")
                             },
                             leadingIcon = {
                                 Icon(
@@ -267,7 +281,7 @@ fun TrackRowItem(
                     }
                     if (onRemoveFromPlaylistClick != null) {
                         DropdownMenuItem(
-                            text = { Text("Remove from playlist") },
+                            text = { Text("Удалить из плейлиста") },
                             leadingIcon = {
                                 Icon(SonoraIcons.DeleteOutline, contentDescription = null)
                             },

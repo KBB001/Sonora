@@ -26,6 +26,7 @@ data class PlaybackState(
     val durationMs: Long = 0L,
     val shuffleEnabled: Boolean = false,
     val repeatMode: RepeatMode = RepeatMode.OFF,
+    val playbackSpeed: Float = 1.0f,
     val sleepTimerRemainingMs: Long? = null,
     val audioSessionId: Int = 0,
     val errorMessage: String? = null

@@ -104,9 +104,9 @@ class PlaybackManager @Inject constructor(
                     isBuffering = false,
                     isLoadingStream = false,
                     errorMessage = if (stalledOnNetwork) {
-                        "Connection lost. Playback will resume when back online."
+                        "Нет сети. Воспроизведение продолжится при подключении."
                     } else {
-                        error.localizedMessage ?: "Playback error occurred"
+                        error.localizedMessage ?: "Ошибка воспроизведения"
                     }
                 )
             }
@@ -217,6 +217,85 @@ class PlaybackManager @Inject constructor(
         }
     }
 
+    fun addTracksToQueue(tracks: List<Track>): Int {
+        if (tracks.isEmpty()) return 0
+        val state = _playbackState.value
+        if (state.currentTrack == null || state.queue.isEmpty()) {
+            playTrack(tracks.first(), tracks)
+            return tracks.size
+        }
+        val existingIds = state.queue.map { it.id }.toSet()
+        val toAdd = tracks.filterNot { it.id in existingIds }
+        if (toAdd.isEmpty()) return 0
+        _playbackState.update {
+            it.copy(queue = it.queue + toAdd)
+        }
+        return toAdd.size
+    }
+
+    fun shuffleUpcomingQueue() {
+        val state = _playbackState.value
+        val curIdx = state.currentIndex
+        if (curIdx !in state.queue.indices || curIdx >= state.queue.lastIndex - 1) return
+        val beforeAndCurrent = state.queue.subList(0, curIdx + 1)
+        val upcoming = state.queue.subList(curIdx + 1, state.queue.size).shuffled()
+        _playbackState.update {
+            it.copy(queue = beforeAndCurrent + upcoming)
+        }
+    }
+
+    fun clearUpcomingQueue() {
+        val state = _playbackState.value
+        val curIdx = state.currentIndex
+        if (curIdx !in state.queue.indices || curIdx >= state.queue.lastIndex) return
+        val kept = state.queue.subList(0, curIdx + 1).toList()
+        _playbackState.update {
+            it.copy(queue = kept)
+        }
+    }
+
+    fun startTrackRadio(
+        track: Track,
+        onResult: ((Result<Int>) -> Unit)? = null
+    ) {
+        scope.launch {
+            if (!networkMonitor.isOnline.value) {
+                onResult?.invoke(Result.failure(IllegalStateException("Радио требует подключения к интернету")))
+                return@launch
+            }
+            val relatedResult = youTubeRepository.getRelatedTracks(track.id)
+            relatedResult.fold(
+                onSuccess = { related ->
+                    val uniqueRelated = related.filterNot { it.id == track.id }.distinctBy { it.id }.take(20)
+                    if (uniqueRelated.isEmpty()) {
+                        onResult?.invoke(Result.failure(IllegalStateException("Похожие треки не найдены")))
+                        return@fold
+                    }
+                    val currentId = _playbackState.value.currentTrack?.id
+                    if (currentId == track.id) {
+                        val curIdx = _playbackState.value.currentIndex.coerceAtLeast(0)
+                        val prefix = _playbackState.value.queue.take(curIdx + 1)
+                        val prefixIds = prefix.map { it.id }.toSet()
+                        val tail = uniqueRelated.filterNot { it.id in prefixIds }
+                        _playbackState.update {
+                            it.copy(
+                                queue = prefix + tail,
+                                currentIndex = curIdx
+                            )
+                        }
+                        onResult?.invoke(Result.success(tail.size))
+                    } else {
+                        playTrack(track, listOf(track) + uniqueRelated)
+                        onResult?.invoke(Result.success(uniqueRelated.size))
+                    }
+                },
+                onFailure = { err ->
+                    onResult?.invoke(Result.failure(err))
+                }
+            )
+        }
+    }
+
     private fun loadAndPlayAtIndex(index: Int) {
         val queue = _playbackState.value.queue
         val track = queue.getOrNull(index) ?: return
@@ -270,6 +349,7 @@ class PlaybackManager @Inject constructor(
                     val controller = mediaController
                     if (controller != null) {
                         controller.volume = 1f
+                        controller.setPlaybackSpeed(_playbackState.value.playbackSpeed)
                         val mediaMetadata = MediaMetadata.Builder()
                             .setTitle(resolvedTrack.title)
                             .setArtist(resolvedTrack.artist)
@@ -299,9 +379,9 @@ class PlaybackManager @Inject constructor(
                             isBuffering = false,
                             isPlaying = false,
                             errorMessage = if (stalledOnNetwork) {
-                                "Offline: download tracks to listen without internet."
+                                "Офлайн: скачайте треки для прослушивания без сети."
                             } else {
-                                throwable.localizedMessage ?: "Could not load audio stream"
+                                throwable.localizedMessage ?: "Не удалось загрузить аудиопоток"
                             }
                         )
                     }
@@ -379,6 +459,12 @@ class PlaybackManager @Inject constructor(
             }
             state.copy(repeatMode = nextMode)
         }
+    }
+
+    fun setPlaybackSpeed(speed: Float) {
+        val clamped = speed.coerceIn(0.5f, 2.0f)
+        mediaController?.setPlaybackSpeed(clamped)
+        _playbackState.update { it.copy(playbackSpeed = clamped) }
     }
 
     fun startSleepTimer(minutes: Int) {

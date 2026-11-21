@@ -1,5 +1,6 @@
 package com.example.ui.library
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -19,7 +20,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -27,6 +31,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
@@ -77,9 +83,12 @@ fun LibraryScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val accountUiState by accountViewModel.uiState.collectAsStateWithLifecycle()
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+    var filterQuery by rememberSaveable { mutableStateOf("") }
+    var showFilterBar by rememberSaveable { mutableStateOf(false) }
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
     var showImportDialog by remember { mutableStateOf(false) }
     var trackForPlaylistDialog by remember { mutableStateOf<Track?>(null) }
+    var playlistPendingDelete by remember { mutableStateOf<Playlist?>(null) }
 
     if (showCreatePlaylistDialog) {
         CreatePlaylistDialog(
@@ -87,7 +96,7 @@ fun LibraryScreen(
             onCreate = { name, desc ->
                 viewModel.createPlaylist(name, desc)
                 showCreatePlaylistDialog = false
-                onShowMessage("Created playlist \"$name\"")
+                onShowMessage("Плейлист «$name» создан")
             }
         )
     }
@@ -103,7 +112,33 @@ fun LibraryScreen(
             onImport = { url ->
                 viewModel.importYouTubePlaylist(url) {
                     showImportDialog = false
-                    onShowMessage("YouTube playlist imported")
+                    onShowMessage("Плейлист YouTube импортирован")
+                }
+            }
+        )
+    }
+
+    playlistPendingDelete?.let { playlist ->
+        AlertDialog(
+            onDismissRequest = { playlistPendingDelete = null },
+            title = { Text("Удалить плейлист?") },
+            text = {
+                Text("Плейлист «${playlist.name}» будет удалён из медиатеки устройства.")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deletePlaylist(playlist.id)
+                        onShowMessage("Плейлист «${playlist.name}» удалён")
+                        playlistPendingDelete = null
+                    }
+                ) {
+                    Text("Удалить")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { playlistPendingDelete = null }) {
+                    Text("Отмена")
                 }
             }
         )
@@ -117,14 +152,32 @@ fun LibraryScreen(
             onSelectPlaylist = { playlistId ->
                 viewModel.addTrackToPlaylist(playlistId, selectedTrack)
                 trackForPlaylistDialog = null
-                onShowMessage("Added to playlist")
+                onShowMessage("Трек добавлен в плейлист")
             },
             onCreateNewPlaylistAndAdd = { name ->
                 viewModel.createPlaylistAndAddTrack(name, selectedTrack)
                 trackForPlaylistDialog = null
-                onShowMessage("Created \"$name\"")
+                onShowMessage("Плейлист «$name» создан")
             }
         )
+    }
+
+    val normalizedFilter = filterQuery.trim()
+    val filteredPlaylists = remember(uiState.playlists, normalizedFilter) {
+        if (normalizedFilter.isEmpty()) uiState.playlists
+        else uiState.playlists.filter {
+            it.name.contains(normalizedFilter, ignoreCase = true) ||
+                it.description.contains(normalizedFilter, ignoreCase = true)
+        }
+    }
+    val filteredFavorites = remember(uiState.favorites, normalizedFilter) {
+        filterTracks(uiState.favorites, normalizedFilter)
+    }
+    val filteredDownloads = remember(uiState.downloads, normalizedFilter) {
+        filterTracks(uiState.downloads, normalizedFilter)
+    }
+    val filteredHistory = remember(uiState.history, normalizedFilter) {
+        filterTracks(uiState.history, normalizedFilter)
     }
 
     Column(
@@ -142,14 +195,37 @@ fun LibraryScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Your Library",
+                text = "Медиатека",
                 style = MaterialTheme.typography.headlineMedium,
-                color = MaterialTheme.colorScheme.onBackground
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.weight(1f)
             )
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = {
+                        showFilterBar = !showFilterBar
+                        if (!showFilterBar) filterQuery = ""
+                    },
+                    modifier = Modifier.testTag("library_filter_toggle")
+                ) {
+                    Icon(
+                        imageVector = SonoraIcons.FilterList,
+                        contentDescription = "Фильтр медиатеки",
+                        tint = if (showFilterBar || filterQuery.isNotEmpty()) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                    )
+                }
+
                 OutlinedButton(
                     onClick = { showImportDialog = true },
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                     modifier = Modifier.testTag("import_playlist_button")
                 ) {
                     Icon(
@@ -158,11 +234,12 @@ fun LibraryScreen(
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Import")
+                    Text("Импорт")
                 }
 
                 Button(
                     onClick = { showCreatePlaylistDialog = true },
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary
@@ -175,9 +252,34 @@ fun LibraryScreen(
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("New")
+                    Text("Создать")
                 }
             }
+        }
+
+        AnimatedVisibility(visible = showFilterBar) {
+            OutlinedTextField(
+                value = filterQuery,
+                onValueChange = { filterQuery = it },
+                placeholder = { Text("Поиск в медиатеке...") },
+                singleLine = true,
+                shape = RoundedCornerShape(14.dp),
+                trailingIcon = {
+                    if (filterQuery.isNotEmpty()) {
+                        IconButton(onClick = { filterQuery = "" }) {
+                            Icon(Icons.Rounded.Close, contentDescription = "Очистить фильтр")
+                        }
+                    }
+                },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .testTag("library_filter_input")
+            )
         }
 
         Spacer(modifier = Modifier.height(10.dp))
@@ -191,10 +293,10 @@ fun LibraryScreen(
         Spacer(modifier = Modifier.height(8.dp))
 
         val tabs = listOf(
-            "Playlists",
-            "Liked (${uiState.favorites.size})",
-            "Offline (${uiState.downloads.size})",
-            "History"
+            "Плейлисты",
+            "Избранное (${uiState.favorites.size})",
+            "Офлайн (${uiState.downloads.size})",
+            "История"
         )
         PrimaryScrollableTabRow(
             selectedTabIndex = selectedTab,
@@ -220,101 +322,116 @@ fun LibraryScreen(
 
         when (selectedTab) {
             0 -> PlaylistsTabContent(
-                playlists = uiState.playlists,
+                playlists = filteredPlaylists,
+                isFiltering = normalizedFilter.isNotEmpty(),
                 bottomContentPadding = bottomContentPadding,
                 onOpenPlaylist = onOpenPlaylist,
-                onDeletePlaylist = viewModel::deletePlaylist
+                onDeletePlaylist = { playlistPendingDelete = it }
             )
 
             1 -> TrackCollectionTabContent(
-                tracks = uiState.favorites,
+                tracks = filteredFavorites,
                 favoriteIds = uiState.favoriteIds,
                 downloadedIds = uiState.downloadedIds,
                 downloadingIds = uiState.downloadingIds,
                 currentTrackId = uiState.playbackState.currentTrack?.id,
                 emptyIcon = Icons.Rounded.Favorite,
-                emptyTitle = "No liked tracks yet",
-                emptySubtitle = "Tap the heart icon on any song to save it here.",
+                emptyTitle = if (normalizedFilter.isNotEmpty()) "Ничего не найдено" else "Пока нет избранных треков",
+                emptySubtitle = if (normalizedFilter.isNotEmpty()) {
+                    "Попробуйте изменить поисковый запрос."
+                } else {
+                    "Нажмите на сердечко у любого трека, чтобы сохранить его здесь."
+                },
                 bottomContentPadding = bottomContentPadding,
-                onPlayTrack = { track -> viewModel.playTrack(track, uiState.favorites) },
+                onPlayAll = { shuffle -> viewModel.playAll(filteredFavorites, shuffle) },
+                onPlayTrack = { track -> viewModel.playTrack(track, filteredFavorites) },
                 onPlayNext = { track ->
                     viewModel.playNext(track)
-                    onShowMessage("Playing next: ${track.title}")
+                    onShowMessage("«${track.title}» включится далее")
                 },
+                onStartRadio = { track -> viewModel.startTrackRadio(track, onShowMessage) },
                 onToggleFavorite = viewModel::toggleFavorite,
                 onToggleDownload = { track -> viewModel.toggleDownload(track, onShowMessage) },
                 onAddToPlaylist = { trackForPlaylistDialog = it }
             )
 
             2 -> TrackCollectionTabContent(
-                tracks = uiState.downloads,
+                tracks = filteredDownloads,
                 favoriteIds = uiState.favoriteIds,
                 downloadedIds = uiState.downloadedIds,
                 downloadingIds = uiState.downloadingIds,
                 currentTrackId = uiState.playbackState.currentTrack?.id,
                 emptyIcon = SonoraIcons.DownloadDone,
-                emptyTitle = "No offline downloads",
-                emptySubtitle = "Download tracks from the menu to listen without internet.",
+                emptyTitle = if (normalizedFilter.isNotEmpty()) "Ничего не найдено" else "Нет скачанных треков",
+                emptySubtitle = if (normalizedFilter.isNotEmpty()) {
+                    "Попробуйте изменить поисковый запрос."
+                } else {
+                    "Скачивайте треки через меню, чтобы слушать музыку без интернета."
+                },
                 bottomContentPadding = bottomContentPadding,
-                onPlayTrack = { track -> viewModel.playTrack(track, uiState.downloads) },
+                onPlayAll = { shuffle -> viewModel.playAll(filteredDownloads, shuffle) },
+                onPlayTrack = { track -> viewModel.playTrack(track, filteredDownloads) },
                 onPlayNext = { track ->
                     viewModel.playNext(track)
-                    onShowMessage("Playing next: ${track.title}")
+                    onShowMessage("«${track.title}» включится далее")
                 },
+                onStartRadio = { track -> viewModel.startTrackRadio(track, onShowMessage) },
                 onToggleFavorite = viewModel::toggleFavorite,
                 onToggleDownload = { track -> viewModel.toggleDownload(track, onShowMessage) },
                 onAddToPlaylist = { trackForPlaylistDialog = it }
             )
 
-            else -> Column(modifier = Modifier.fillMaxSize()) {
-                if (uiState.history.isNotEmpty()) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 4.dp),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        TextButton(onClick = viewModel::clearHistory) {
-                            Text("Clear history")
-                        }
-                    }
-                }
-                TrackCollectionTabContent(
-                    tracks = uiState.history,
-                    favoriteIds = uiState.favoriteIds,
-                    downloadedIds = uiState.downloadedIds,
-                    downloadingIds = uiState.downloadingIds,
-                    currentTrackId = uiState.playbackState.currentTrack?.id,
-                    emptyIcon = SonoraIcons.History,
-                    emptyTitle = "No listening history yet",
-                    emptySubtitle = "Tracks you stream will appear here automatically.",
-                    bottomContentPadding = bottomContentPadding,
-                    onPlayTrack = { track -> viewModel.playTrack(track, uiState.history) },
-                    onPlayNext = { track ->
-                        viewModel.playNext(track)
-                        onShowMessage("Playing next: ${track.title}")
-                    },
-                    onToggleFavorite = viewModel::toggleFavorite,
-                    onToggleDownload = { track -> viewModel.toggleDownload(track, onShowMessage) },
-                    onAddToPlaylist = { trackForPlaylistDialog = it }
-                )
-            }
+            else -> TrackCollectionTabContent(
+                tracks = filteredHistory,
+                favoriteIds = uiState.favoriteIds,
+                downloadedIds = uiState.downloadedIds,
+                downloadingIds = uiState.downloadingIds,
+                currentTrackId = uiState.playbackState.currentTrack?.id,
+                emptyIcon = SonoraIcons.History,
+                emptyTitle = if (normalizedFilter.isNotEmpty()) "Ничего не найдено" else "История прослушивания пуста",
+                emptySubtitle = if (normalizedFilter.isNotEmpty()) {
+                    "Попробуйте изменить поисковый запрос."
+                } else {
+                    "Прослушанные треки появятся здесь автоматически."
+                },
+                bottomContentPadding = bottomContentPadding,
+                onPlayAll = { shuffle -> viewModel.playAll(filteredHistory, shuffle) },
+                onClearHistory = if (uiState.history.isNotEmpty()) viewModel::clearHistory else null,
+                onPlayTrack = { track -> viewModel.playTrack(track, filteredHistory) },
+                onPlayNext = { track ->
+                    viewModel.playNext(track)
+                    onShowMessage("«${track.title}» включится далее")
+                },
+                onStartRadio = { track -> viewModel.startTrackRadio(track, onShowMessage) },
+                onToggleFavorite = viewModel::toggleFavorite,
+                onToggleDownload = { track -> viewModel.toggleDownload(track, onShowMessage) },
+                onAddToPlaylist = { trackForPlaylistDialog = it }
+            )
         }
+    }
+}
+
+private fun filterTracks(tracks: List<Track>, query: String): List<Track> {
+    if (query.isEmpty()) return tracks
+    return tracks.filter {
+        it.title.contains(query, ignoreCase = true) ||
+            it.artist.contains(query, ignoreCase = true)
     }
 }
 
 @Composable
 private fun PlaylistsTabContent(
     playlists: List<Playlist>,
+    isFiltering: Boolean,
     bottomContentPadding: PaddingValues,
     onOpenPlaylist: (Long) -> Unit,
-    onDeletePlaylist: (Long) -> Unit
+    onDeletePlaylist: (Playlist) -> Unit
 ) {
     if (playlists.isEmpty()) {
         EmptyLibraryPlaceholder(
             icon = SonoraIcons.LibraryMusic,
-            title = stringResource(R.string.empty_library_title),
-            subtitle = stringResource(R.string.empty_library_subtitle)
+            title = if (isFiltering) "Плейлисты не найдены" else stringResource(R.string.empty_library_title),
+            subtitle = if (isFiltering) "Попробуйте другой поисковый запрос." else stringResource(R.string.empty_library_subtitle)
         )
     } else {
         LazyColumn(
@@ -349,7 +466,7 @@ private fun PlaylistsTabContent(
                             if (!playlist.coverUrl.isNullOrBlank()) {
                                 AsyncImage(
                                     model = playlist.coverUrl,
-                                    contentDescription = "${playlist.name} cover",
+                                    contentDescription = "${playlist.name} обложка",
                                     placeholder = painterResource(R.drawable.img_default_cover),
                                     error = painterResource(R.drawable.img_default_cover),
                                     contentScale = ContentScale.Crop,
@@ -378,7 +495,7 @@ private fun PlaylistsTabContent(
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = "${playlist.trackCount} tracks" +
+                                text = "${playlist.trackCount} треков" +
                                     if (playlist.description.isNotBlank()) " • ${playlist.description}" else "",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -388,14 +505,14 @@ private fun PlaylistsTabContent(
                         }
 
                         IconButton(
-                            onClick = { onDeletePlaylist(playlist.id) },
+                            onClick = { onDeletePlaylist(playlist) },
                             modifier = Modifier
                                 .minimumInteractiveComponentSize()
                                 .testTag("delete_playlist_${playlist.id}")
                         ) {
                             Icon(
                                 imageVector = SonoraIcons.DeleteOutline,
-                                contentDescription = "Delete playlist",
+                                contentDescription = "Удалить плейлист",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -417,8 +534,11 @@ private fun TrackCollectionTabContent(
     emptyTitle: String,
     emptySubtitle: String,
     bottomContentPadding: PaddingValues,
+    onPlayAll: (Boolean) -> Unit,
+    onClearHistory: (() -> Unit)? = null,
     onPlayTrack: (Track) -> Unit,
     onPlayNext: (Track) -> Unit,
+    onStartRadio: (Track) -> Unit,
     onToggleFavorite: (Track) -> Unit,
     onToggleDownload: (Track) -> Unit,
     onAddToPlaylist: (Track) -> Unit
@@ -434,11 +554,46 @@ private fun TrackCollectionTabContent(
             contentPadding = PaddingValues(
                 start = 16.dp,
                 end = 16.dp,
-                top = 12.dp,
+                top = 10.dp,
                 bottom = bottomContentPadding.calculateBottomPadding() + 16.dp
             ),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            item(key = "collection_actions_bar") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { onPlayAll(false) },
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                        ) {
+                            Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Слушать")
+                        }
+                        OutlinedButton(
+                            onClick = { onPlayAll(true) },
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                        ) {
+                            Icon(SonoraIcons.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Микс")
+                        }
+                    }
+
+                    if (onClearHistory != null) {
+                        TextButton(onClick = onClearHistory) {
+                            Text("Очистить")
+                        }
+                    }
+                }
+            }
+
             items(tracks, key = { it.id }) { track ->
                 TrackRowItem(
                     track = track,
@@ -449,6 +604,7 @@ private fun TrackCollectionTabContent(
                     onPlayClick = { onPlayTrack(track) },
                     onFavoriteClick = { onToggleFavorite(track) },
                     onPlayNextClick = { onPlayNext(track) },
+                    onStartRadioClick = { onStartRadio(track) },
                     onDownloadClick = { onToggleDownload(track) },
                     onAddToPlaylistClick = { onAddToPlaylist(track) }
                 )

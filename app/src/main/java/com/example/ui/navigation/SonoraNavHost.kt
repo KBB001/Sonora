@@ -77,28 +77,28 @@ private data class TopLevelDestination(
 private val topLevelDestinations = listOf(
     TopLevelDestination(
         route = SonoraRoute.Home,
-        label = "Home",
+        label = "Главная",
         selectedIcon = Icons.Rounded.Home,
         unselectedIcon = Icons.Outlined.Home,
         testTag = "nav_home"
     ),
     TopLevelDestination(
         route = SonoraRoute.Search,
-        label = "Search",
+        label = "Поиск",
         selectedIcon = Icons.Rounded.Search,
         unselectedIcon = Icons.Outlined.Search,
         testTag = "nav_search"
     ),
     TopLevelDestination(
         route = SonoraRoute.Library,
-        label = "Library",
+        label = "Медиатека",
         selectedIcon = SonoraIcons.LibraryMusic,
         unselectedIcon = SonoraIcons.LibraryMusicOutlined,
         testTag = "nav_library"
     ),
     TopLevelDestination(
         route = SonoraRoute.Settings,
-        label = "Settings",
+        label = "Настройки",
         selectedIcon = Icons.Rounded.Settings,
         unselectedIcon = Icons.Outlined.Settings,
         testTag = "nav_settings"
@@ -249,12 +249,12 @@ fun SonoraNavHost(
                         ) {
                             Icon(
                                 imageVector = SonoraIcons.WifiOff,
-                                contentDescription = "Offline",
+                                contentDescription = "Офлайн",
                                 tint = MaterialTheme.colorScheme.onErrorContainer,
                                 modifier = Modifier.size(16.dp)
                             )
                             Text(
-                                text = "Offline mode • Playing downloaded & cached audio",
+                                text = "Офлайн-режим • Воспроизведение скачанных и кэшированных треков",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onErrorContainer
                             )
@@ -290,6 +290,10 @@ fun SonoraNavHost(
                             composable<SonoraRoute.Home> {
                                 HomeScreen(
                                     onNavigateToSearch = { navigateTopLevel(SonoraRoute.Search) },
+                                    onOpenPlaylist = { playlistId ->
+                                        navController.navigate(SonoraRoute.PlaylistDetail(playlistId))
+                                    },
+                                    onOpenSettings = { navigateTopLevel(SonoraRoute.Settings) },
                                     bottomContentPadding = contentPadding,
                                     onShowMessage = ::showMessage
                                 )

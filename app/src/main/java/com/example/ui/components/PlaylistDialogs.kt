@@ -46,13 +46,13 @@ fun CreatePlaylistDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("New Playlist") },
+        title = { Text("Новый плейлист") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Playlist name") },
+                    label = { Text("Название плейлиста") },
                     singleLine = true,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -61,7 +61,7 @@ fun CreatePlaylistDialog(
                 OutlinedTextField(
                     value = description,
                     onValueChange = { description = it },
-                    label = { Text("Description (optional)") },
+                    label = { Text("Описание (необязательно)") },
                     maxLines = 2,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -79,12 +79,68 @@ fun CreatePlaylistDialog(
                 enabled = name.isNotBlank(),
                 modifier = Modifier.testTag("confirm_create_playlist_button")
             ) {
-                Text("Create")
+                Text("Создать")
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text("Отмена")
+            }
+        }
+    )
+}
+
+@Composable
+fun EditPlaylistDialog(
+    initialName: String,
+    initialDescription: String,
+    onDismiss: () -> Unit,
+    onSave: (name: String, description: String) -> Unit
+) {
+    var name by rememberSaveable(initialName) { mutableStateOf(initialName) }
+    var description by rememberSaveable(initialDescription) { mutableStateOf(initialDescription) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Редактировать плейлист") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Название плейлиста") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("edit_playlist_name_input")
+                )
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text("Описание") },
+                    maxLines = 3,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("edit_playlist_desc_input")
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (name.isNotBlank()) {
+                        onSave(name.trim(), description.trim())
+                    }
+                },
+                enabled = name.isNotBlank(),
+                modifier = Modifier.testTag("confirm_edit_playlist_button")
+            ) {
+                Text("Сохранить")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Отмена")
             }
         }
     )
@@ -101,11 +157,11 @@ fun ImportYouTubePlaylistDialog(
 
     AlertDialog(
         onDismissRequest = { if (!isLoading) onDismiss() },
-        title = { Text("Import YouTube Playlist") },
+        title = { Text("Импорт плейлиста YouTube") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    text = "Paste a public YouTube playlist URL to import its tracks into your local library.",
+                    text = "Вставьте ссылку на открытый плейлист YouTube для добавления треков в медиатеку.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -134,7 +190,7 @@ fun ImportYouTubePlaylistDialog(
                 enabled = url.isNotBlank() && !isLoading,
                 modifier = Modifier.testTag("confirm_import_playlist_button")
             ) {
-                Text(if (isLoading) "Importing..." else "Import")
+                Text(if (isLoading) "Импорт..." else "Импортировать")
             }
         },
         dismissButton = {
@@ -142,7 +198,7 @@ fun ImportYouTubePlaylistDialog(
                 onClick = onDismiss,
                 enabled = !isLoading
             ) {
-                Text("Cancel")
+                Text("Отмена")
             }
         }
     )
@@ -161,7 +217,7 @@ fun AddToPlaylistDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add to Playlist") },
+        title = { Text("Добавить в плейлист") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
@@ -200,7 +256,7 @@ fun AddToPlaylistDialog(
                                             style = MaterialTheme.typography.titleMedium
                                         )
                                         Text(
-                                            text = "${playlist.trackCount} tracks",
+                                            text = "${playlist.trackCount} треков",
                                             style = MaterialTheme.typography.bodyMedium,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
@@ -220,7 +276,7 @@ fun AddToPlaylistDialog(
                     OutlinedTextField(
                         value = newPlaylistName,
                         onValueChange = { newPlaylistName = it },
-                        label = { Text("New playlist name") },
+                        label = { Text("Название нового плейлиста") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -228,7 +284,7 @@ fun AddToPlaylistDialog(
                     TextButton(onClick = { showCreateInline = true }) {
                         Icon(Icons.Rounded.Add, contentDescription = null)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Create new playlist")
+                        Text("Создать новый плейлист")
                     }
                 }
             }
@@ -243,18 +299,18 @@ fun AddToPlaylistDialog(
                     },
                     enabled = newPlaylistName.isNotBlank()
                 ) {
-                    Text("Create & Add")
+                    Text("Создать и добавить")
                 }
             } else {
                 TextButton(onClick = onDismiss) {
-                    Text("Close")
+                    Text("Закрыть")
                 }
             }
         },
         dismissButton = {
             if (showCreateInline) {
                 TextButton(onClick = onDismiss) {
-                    Text("Cancel")
+                    Text("Отмена")
                 }
             }
         }

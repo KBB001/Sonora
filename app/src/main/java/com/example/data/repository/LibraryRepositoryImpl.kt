@@ -184,6 +184,17 @@ class LibraryRepositoryImpl @Inject constructor(
         playlistDao.deletePlaylist(playlistId)
     }
 
+    override suspend fun updatePlaylistDetails(
+        playlistId: Long,
+        name: String,
+        description: String
+    ) {
+        val cleanName = name.trim().take(120)
+        if (cleanName.isBlank()) return
+        val cleanDesc = description.trim().take(500)
+        playlistDao.updatePlaylistDetails(playlistId, cleanName, cleanDesc)
+    }
+
     override suspend fun addTrackToPlaylist(playlistId: Long, track: Track) {
         playlistDao.insertPlaylistTrack(PlaylistTrackEntity.fromDomain(playlistId, track))
         writeThroughSync?.onTrackAddedToPlaylist(playlistId, track)

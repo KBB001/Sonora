@@ -13,6 +13,7 @@ import com.example.domain.repository.YouTubeRepository
 import com.example.playback.PlaybackManager
 import com.example.ui.navigation.SonoraRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -76,12 +77,29 @@ class LibraryViewModel @Inject constructor(
         initialValue = LibraryUiState()
     )
 
+    fun playAll(tracks: List<Track>, shuffle: Boolean = false) {
+        if (tracks.isEmpty()) return
+        val queue = if (shuffle) tracks.shuffled() else tracks
+        playbackManager.playTrack(queue.first(), queue)
+    }
+
     fun playTrack(track: Track, queue: List<Track>) {
         playbackManager.playTrack(track, queue)
     }
 
     fun playNext(track: Track) {
         playbackManager.playNext(track)
+    }
+
+    fun startTrackRadio(track: Track, onNotice: (String) -> Unit) {
+        onNotice("Подбираем радио по треку...")
+        playbackManager.startTrackRadio(track) { result ->
+            result.onSuccess { added ->
+                onNotice("Радио запущено: +$added треков")
+            }.onFailure { err ->
+                onNotice(err.localizedMessage ?: "Не удалось запустить радио")
+            }
+        }
     }
 
     fun toggleFavorite(track: Track) {
@@ -94,13 +112,13 @@ class LibraryViewModel @Inject constructor(
         viewModelScope.launch {
             if (track.id in uiState.value.downloadedIds) {
                 trackDownloadManager.removeDownload(track.id)
-                onNotice("Removed offline copy")
+                onNotice("Офлайн-копия удалена")
             } else {
-                onNotice("Downloading \"${track.title}\"...")
+                onNotice("Загрузка «${track.title}»...")
                 trackDownloadManager.downloadTrack(track).onSuccess {
-                    onNotice("Saved for offline playback")
+                    onNotice("Сохранено для офлайн-прослушивания")
                 }.onFailure { err ->
-                    onNotice(err.localizedMessage ?: "Download failed")
+                    onNotice(err.localizedMessage ?: "Ошибка загрузки")
                 }
             }
         }
@@ -147,11 +165,11 @@ class LibraryViewModel @Inject constructor(
             youTubeRepository.getPlaylistWithTitle(playlistUrl).fold(
                 onSuccess = { (title, tracks) ->
                     if (tracks.isEmpty()) {
-                        importError.value = "No playable tracks found in this playlist."
+                        importError.value = "В этом плейлисте не найдены доступные треки."
                     } else {
                         libraryRepository.createPlaylist(
                             name = title,
-                            description = "Imported from YouTube",
+                            description = "Импортировано из YouTube",
                             initialTracks = tracks
                         )
                         onSuccess()
@@ -160,7 +178,7 @@ class LibraryViewModel @Inject constructor(
                 },
                 onFailure = { throwable ->
                     importError.value = throwable.localizedMessage
-                        ?: "Could not import playlist. Verify the URL is public."
+                        ?: "Не удалось импортировать плейлист. Проверьте, что он открытый."
                     isImporting.value = false
                 }
             )
@@ -174,6 +192,7 @@ data class PlaylistDetailUiState(
     val favoriteIds: Set<String> = emptySet(),
     val downloadedIds: Set<String> = emptySet(),
     val downloadingIds: Set<String> = emptySet(),
+    val isBatchDownloading: Boolean = false,
     val playbackState: PlaybackState = PlaybackState()
 )
 
@@ -187,6 +206,8 @@ class PlaylistDetailViewModel @Inject constructor(
 
     private val route = savedStateHandle.toRoute<SonoraRoute.PlaylistDetail>()
     private val playlistId = route.playlistId
+    private val isBatchDownloadingFlow = MutableStateFlow(false)
+    private var batchDownloadJob: Job? = null
 
     val uiState: StateFlow<PlaylistDetailUiState> = combine(
         libraryRepository.observePlaylistById(playlistId),
@@ -194,6 +215,7 @@ class PlaylistDetailViewModel @Inject constructor(
         libraryRepository.observeFavoriteIds(),
         libraryRepository.observeDownloadedIds(),
         trackDownloadManager.downloadingIds,
+        isBatchDownloadingFlow,
         playbackManager.playbackState
     ) { values ->
         @Suppress("UNCHECKED_CAST")
@@ -203,7 +225,8 @@ class PlaylistDetailViewModel @Inject constructor(
             favoriteIds = values[2] as Set<String>,
             downloadedIds = values[3] as Set<String>,
             downloadingIds = values[4] as Set<String>,
-            playbackState = values[5] as PlaybackState
+            isBatchDownloading = values[5] as Boolean,
+            playbackState = values[6] as PlaybackState
         )
     }.stateIn(
         scope = viewModelScope,
@@ -218,12 +241,64 @@ class PlaylistDetailViewModel @Inject constructor(
         playbackManager.playTrack(queue.first(), queue)
     }
 
+    fun addAllToQueue(onNotice: (String) -> Unit) {
+        val tracks = uiState.value.tracks
+        if (tracks.isEmpty()) return
+        val added = playbackManager.addTracksToQueue(tracks)
+        onNotice(
+            if (added > 0) "В очередь добавлено треков: $added"
+            else "Все треки уже в очереди"
+        )
+    }
+
     fun playTrack(track: Track) {
         playbackManager.playTrack(track, uiState.value.tracks)
     }
 
     fun playNext(track: Track) {
         playbackManager.playNext(track)
+    }
+
+    fun startTrackRadio(track: Track, onNotice: (String) -> Unit) {
+        onNotice("Подбираем радио по треку...")
+        playbackManager.startTrackRadio(track) { result ->
+            result.onSuccess { added ->
+                onNotice("Радио запущено: +$added треков")
+            }.onFailure { err ->
+                onNotice(err.localizedMessage ?: "Не удалось запустить радио")
+            }
+        }
+    }
+
+    fun updatePlaylistDetails(name: String, description: String) {
+        viewModelScope.launch {
+            libraryRepository.updatePlaylistDetails(playlistId, name, description)
+        }
+    }
+
+    fun downloadAllMissing(onNotice: (String) -> Unit) {
+        if (batchDownloadJob?.isActive == true) {
+            onNotice("Загрузка плейлиста уже выполняется")
+            return
+        }
+        val state = uiState.value
+        val pending = state.tracks.filterNot { it.id in state.downloadedIds }
+        if (pending.isEmpty()) {
+            onNotice("Все треки уже сохранены офлайн")
+            return
+        }
+        batchDownloadJob = viewModelScope.launch {
+            isBatchDownloadingFlow.value = true
+            onNotice("Загрузка ${pending.size} треков для офлайн...")
+            var successCount = 0
+            pending.forEach { track ->
+                trackDownloadManager.downloadTrack(track).onSuccess {
+                    successCount++
+                }
+            }
+            isBatchDownloadingFlow.value = false
+            onNotice("Загружено $successCount из ${pending.size} треков")
+        }
     }
 
     fun toggleFavorite(track: Track) {
@@ -236,13 +311,13 @@ class PlaylistDetailViewModel @Inject constructor(
         viewModelScope.launch {
             if (track.id in uiState.value.downloadedIds) {
                 trackDownloadManager.removeDownload(track.id)
-                onNotice("Removed offline copy")
+                onNotice("Офлайн-копия удалена")
             } else {
-                onNotice("Downloading \"${track.title}\"...")
+                onNotice("Загрузка «${track.title}»...")
                 trackDownloadManager.downloadTrack(track).onSuccess {
-                    onNotice("Saved for offline playback")
+                    onNotice("Сохранено для офлайн-прослушивания")
                 }.onFailure { err ->
-                    onNotice(err.localizedMessage ?: "Download failed")
+                    onNotice(err.localizedMessage ?: "Ошибка загрузки")
                 }
             }
         }

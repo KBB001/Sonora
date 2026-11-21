@@ -33,6 +33,7 @@ interface LibraryRepository {
         youtubePlaylistId: String? = null
     ): Long
     suspend fun deletePlaylist(playlistId: Long)
+    suspend fun updatePlaylistDetails(playlistId: Long, name: String, description: String)
     suspend fun addTrackToPlaylist(playlistId: Long, track: Track)
     suspend fun removeTrackFromPlaylist(playlistId: Long, trackId: String)
 

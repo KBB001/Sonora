@@ -1,6 +1,8 @@
 package com.example.ui.player
 
+import android.content.Intent
 import android.graphics.Bitmap
+import android.net.Uri
 import android.os.Build
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
@@ -22,7 +24,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -85,6 +86,7 @@ import coil.request.ImageRequest
 import coil.request.SuccessResult
 import com.example.R
 import com.example.core.common.DurationFormatter
+import com.example.domain.model.PlaybackProgress
 import com.example.domain.model.RepeatMode
 import com.example.ui.components.AddToPlaylistDialog
 import com.example.ui.components.SonoraIcons
@@ -94,7 +96,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import com.example.domain.model.PlaybackProgress
+import java.util.Locale
+import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -113,6 +116,7 @@ fun NowPlayingScreen(
     var showLyricsSheet by remember { mutableStateOf(false) }
     var showEqualizerSheet by remember { mutableStateOf(false) }
     var showSleepTimerDialog by remember { mutableStateOf(false) }
+    var showSpeedDialog by remember { mutableStateOf(false) }
     var showAddToPlaylistDialog by remember { mutableStateOf(false) }
 
     val defaultAccent = MaterialTheme.colorScheme.primaryContainer
@@ -172,17 +176,19 @@ fun NowPlayingScreen(
             onSelectPlaylist = { playlistId ->
                 viewModel.addTrackToPlaylist(playlistId, track)
                 showAddToPlaylistDialog = false
-                showNotice("Added to playlist")
+                showNotice("Трек добавлен в плейлист")
             },
             onCreateNewPlaylistAndAdd = { name ->
                 viewModel.createPlaylistAndAddTrack(name, track)
                 showAddToPlaylistDialog = false
-                showNotice("Created \"$name\"")
+                showNotice("Плейлист «$name» создан")
             }
         )
     }
 
     if (showQueueSheet) {
+        val hasUpcomingTracks = playback.currentIndex >= 0 &&
+            playback.currentIndex < playback.queue.lastIndex
         ModalBottomSheet(
             onDismissRequest = { showQueueSheet = false },
             containerColor = MaterialTheme.colorScheme.surface
@@ -194,10 +200,44 @@ fun NowPlayingScreen(
                     .padding(bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text(
-                    text = "Up Next (${playback.queue.size})",
-                    style = MaterialTheme.typography.titleLarge
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Очередь (${playback.queue.size})",
+                        style = MaterialTheme.typography.titleLarge
+                    )
+                    if (hasUpcomingTracks) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(
+                                onClick = {
+                                    viewModel.shuffleUpcomingQueue()
+                                    showNotice("Следующие треки перемешаны")
+                                },
+                                modifier = Modifier.testTag("queue_shuffle_upcoming_button")
+                            ) {
+                                Icon(
+                                    imageVector = SonoraIcons.Shuffle,
+                                    contentDescription = "Перемешать очередь"
+                                )
+                            }
+                            IconButton(
+                                onClick = {
+                                    viewModel.clearUpcomingQueue()
+                                    showNotice("Очередь далее очищена")
+                                },
+                                modifier = Modifier.testTag("queue_clear_upcoming_button")
+                            ) {
+                                Icon(
+                                    imageVector = SonoraIcons.ClearAll,
+                                    contentDescription = "Очистить далее"
+                                )
+                            }
+                        }
+                    }
+                }
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.height(360.dp)
@@ -232,7 +272,7 @@ fun NowPlayingScreen(
                                 ) {
                                     Icon(
                                         imageVector = Icons.Rounded.KeyboardArrowUp,
-                                        contentDescription = "Move up",
+                                        contentDescription = "Вверх",
                                         modifier = Modifier.size(18.dp)
                                     )
                                 }
@@ -243,7 +283,7 @@ fun NowPlayingScreen(
                                 ) {
                                     Icon(
                                         imageVector = Icons.Rounded.KeyboardArrowDown,
-                                        contentDescription = "Move down",
+                                        contentDescription = "Вниз",
                                         modifier = Modifier.size(18.dp)
                                     )
                                 }
@@ -255,7 +295,7 @@ fun NowPlayingScreen(
                                 ) {
                                     Icon(
                                         imageVector = Icons.Rounded.Close,
-                                        contentDescription = "Remove from queue",
+                                        contentDescription = "Убрать из очереди",
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
@@ -295,20 +335,53 @@ fun NowPlayingScreen(
         }
     }
 
+    if (showSpeedDialog) {
+        val speeds = listOf(0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
+        AlertDialog(
+            onDismissRequest = { showSpeedDialog = false },
+            title = { Text("Скорость воспроизведения") },
+            text = {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    speeds.forEach { speed ->
+                        val selected = abs(playback.playbackSpeed - speed) < 0.05f
+                        val label = String.format(Locale.US, "%.2fx", speed).replace(".00", "")
+                        FilterChip(
+                            selected = selected,
+                            onClick = {
+                                viewModel.setPlaybackSpeed(speed)
+                                showNotice("Скорость: $label")
+                                showSpeedDialog = false
+                            },
+                            label = { Text(label) }
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showSpeedDialog = false }) {
+                    Text("Закрыть")
+                }
+            }
+        )
+    }
+
     if (showSleepTimerDialog) {
         AlertDialog(
             onDismissRequest = { showSleepTimerDialog = false },
-            title = { Text("Sleep Timer") },
+            title = { Text("Таймер сна") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     playback.sleepTimerRemainingMs?.let { rem ->
                         Text(
-                            text = "Stopping playback in ${DurationFormatter.formatMillis(rem)}",
+                            text = "Остановка через ${DurationFormatter.formatMillis(rem)}",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.primary
                         )
                     } ?: Text(
-                        text = "Fade out volume over the final 5 seconds and pause automatically.",
+                        text = "Плавное затухание громкости в последние 5 секунд перед паузой.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -317,17 +390,17 @@ fun NowPlayingScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        val options = listOf(0 to "Off", 15 to "15m", 30 to "30m", 45 to "45m", 60 to "60m")
+                        val options = listOf(0 to "Выкл", 15 to "15 мин", 30 to "30 мин", 45 to "45 мин", 60 to "60 мин")
                         options.forEach { (mins, label) ->
                             FilterChip(
                                 selected = mins == 0 && playback.sleepTimerRemainingMs == null,
                                 onClick = {
                                     if (mins == 0) {
                                         viewModel.cancelSleepTimer()
-                                        showNotice("Sleep timer turned off")
+                                        showNotice("Таймер сна отключён")
                                     } else {
                                         viewModel.startSleepTimer(mins)
-                                        showNotice("Sleep timer set for $mins minutes")
+                                        showNotice("Таймер сна: $mins мин")
                                     }
                                     showSleepTimerDialog = false
                                 },
@@ -339,7 +412,7 @@ fun NowPlayingScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showSleepTimerDialog = false }) {
-                    Text("Close")
+                    Text("Закрыть")
                 }
             }
         )
@@ -381,36 +454,73 @@ fun NowPlayingScreen(
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.KeyboardArrowDown,
-                        contentDescription = "Minimize player",
+                        contentDescription = "Свернуть плеер",
                         modifier = Modifier.size(32.dp)
                     )
                 }
 
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.weight(1f)
+                ) {
                     Text(
-                        text = "NOW PLAYING",
+                        text = "СЕЙЧАС ИГРАЕТ",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    playback.sleepTimerRemainingMs?.let { rem ->
+                    val speedActive = abs(playback.playbackSpeed - 1.0f) >= 0.05f
+                    val statusLine = buildList {
+                        playback.sleepTimerRemainingMs?.let { rem ->
+                            add("Сон: ${DurationFormatter.formatMillis(rem)}")
+                        }
+                        if (speedActive) {
+                            add(String.format(Locale.US, "%.2fx", playback.playbackSpeed).replace(".00", ""))
+                        }
+                    }.joinToString(" • ")
+                    if (statusLine.isNotEmpty()) {
                         Text(
-                            text = "Sleep in ${DurationFormatter.formatMillis(rem)}",
+                            text = statusLine,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary
                         )
                     }
                 }
 
-                IconButton(
-                    onClick = { showQueueSheet = true },
-                    modifier = Modifier
-                        .minimumInteractiveComponentSize()
-                        .testTag("player_queue_button")
-                ) {
-                    Icon(
-                        imageVector = SonoraIcons.QueueMusic,
-                        contentDescription = "Open queue"
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (track != null) {
+                        IconButton(
+                            onClick = {
+                                val shareUrl = "https://music.youtube.com/watch?v=${Uri.encode(track.id)}"
+                                val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_TEXT, "${track.title} — ${track.artist}\n$shareUrl")
+                                }
+                                runCatching {
+                                    context.startActivity(Intent.createChooser(sendIntent, "Поделиться треком"))
+                                }
+                            },
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("player_share_button")
+                        ) {
+                            Icon(
+                                imageVector = SonoraIcons.Share,
+                                contentDescription = "Поделиться треком"
+                            )
+                        }
+                    }
+
+                    IconButton(
+                        onClick = { showQueueSheet = true },
+                        modifier = Modifier
+                            .minimumInteractiveComponentSize()
+                            .testTag("player_queue_button")
+                    ) {
+                        Icon(
+                            imageVector = SonoraIcons.QueueMusic,
+                            contentDescription = "Открыть очередь"
+                        )
+                    }
                 }
             }
 
@@ -422,7 +532,7 @@ fun NowPlayingScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "Pick a song to start listening",
+                        text = "Выберите трек для прослушивания",
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -438,7 +548,7 @@ fun NowPlayingScreen(
                     val artSize = min(maxWidth, maxHeight).coerceAtMost(310.dp)
                     AsyncImage(
                         model = track.thumbnailUrl,
-                        contentDescription = "${track.title} album art",
+                        contentDescription = "Обложка ${track.title}",
                         placeholder = painterResource(R.drawable.img_default_cover),
                         error = painterResource(R.drawable.img_default_cover),
                         contentScale = ContentScale.Crop,
@@ -502,7 +612,7 @@ fun NowPlayingScreen(
                         ) {
                             Icon(
                                 imageVector = if (isFav) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                                contentDescription = if (isFav) "Unlike track" else "Like track",
+                                contentDescription = if (isFav) "Убрать из избранного" else "В избранное",
                                 tint = if (isFav) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                             )
                         }
@@ -515,15 +625,15 @@ fun NowPlayingScreen(
                         ) {
                             Icon(
                                 imageVector = SonoraIcons.PlaylistAdd,
-                                contentDescription = "Add to playlist"
+                                contentDescription = "Добавить в плейлист"
                             )
                         }
                     }
 
-                    // Secondary Audio Tools Row: Lyrics, Offline Download, Equalizer, Sleep Timer
+                    // Audio Tools: Lyrics, Offline, Radio, Speed, Equalizer, Sleep Timer
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         IconButton(
@@ -534,7 +644,7 @@ fun NowPlayingScreen(
                         ) {
                             Icon(
                                 imageVector = SonoraIcons.Lyrics,
-                                contentDescription = "Show lyrics",
+                                contentDescription = "Текст песни",
                                 tint = if (uiState.lyricsState is LyricsUiState.Success) {
                                     MaterialTheme.colorScheme.primary
                                 } else {
@@ -564,9 +674,9 @@ fun NowPlayingScreen(
                                         SonoraIcons.DownloadForOffline
                                     },
                                     contentDescription = if (isDownloaded) {
-                                        "Remove offline download"
+                                        "Удалить офлайн-копию"
                                     } else {
-                                        "Download track"
+                                        "Скачать трек"
                                     },
                                     tint = if (isDownloaded) {
                                         MaterialTheme.colorScheme.primary
@@ -578,6 +688,36 @@ fun NowPlayingScreen(
                         }
 
                         IconButton(
+                            onClick = { viewModel.startRadioFromCurrentTrack(::showNotice) },
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("player_radio_button")
+                        ) {
+                            Icon(
+                                imageVector = SonoraIcons.Radio,
+                                contentDescription = "Радио по треку",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        IconButton(
+                            onClick = { showSpeedDialog = true },
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("player_speed_button")
+                        ) {
+                            Icon(
+                                imageVector = SonoraIcons.Speed,
+                                contentDescription = "Скорость воспроизведения",
+                                tint = if (abs(playback.playbackSpeed - 1.0f) >= 0.05f) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+                        }
+
+                        IconButton(
                             onClick = { showEqualizerSheet = true },
                             modifier = Modifier
                                 .minimumInteractiveComponentSize()
@@ -585,7 +725,7 @@ fun NowPlayingScreen(
                         ) {
                             Icon(
                                 imageVector = SonoraIcons.Equalizer,
-                                contentDescription = "Audio equalizer",
+                                contentDescription = "Эквалайзер",
                                 tint = if (uiState.equalizerState.isEnabled) {
                                     MaterialTheme.colorScheme.primary
                                 } else {
@@ -602,7 +742,7 @@ fun NowPlayingScreen(
                         ) {
                             Icon(
                                 imageVector = SonoraIcons.Bedtime,
-                                contentDescription = "Sleep timer",
+                                contentDescription = "Таймер сна",
                                 tint = if (playback.sleepTimerRemainingMs != null) {
                                     MaterialTheme.colorScheme.primary
                                 } else {
@@ -633,7 +773,7 @@ fun NowPlayingScreen(
                         ) {
                             Icon(
                                 imageVector = SonoraIcons.Shuffle,
-                                contentDescription = "Toggle shuffle",
+                                contentDescription = "Перемешать",
                                 tint = if (playback.shuffleEnabled) {
                                     MaterialTheme.colorScheme.primary
                                 } else {
@@ -650,7 +790,7 @@ fun NowPlayingScreen(
                         ) {
                             Icon(
                                 imageVector = SonoraIcons.SkipPrevious,
-                                contentDescription = "Previous track",
+                                contentDescription = "Предыдущий трек",
                                 modifier = Modifier.size(36.dp)
                             )
                         }
@@ -679,7 +819,7 @@ fun NowPlayingScreen(
                                     } else {
                                         Icons.Rounded.PlayArrow
                                     },
-                                    contentDescription = if (playback.isPlaying) "Pause" else "Play",
+                                    contentDescription = if (playback.isPlaying) "Пауза" else "Воспроизвести",
                                     modifier = Modifier.size(36.dp)
                                 )
                             }
@@ -693,7 +833,7 @@ fun NowPlayingScreen(
                         ) {
                             Icon(
                                 imageVector = SonoraIcons.SkipNext,
-                                contentDescription = "Next track",
+                                contentDescription = "Следующий трек",
                                 modifier = Modifier.size(36.dp)
                             )
                         }
@@ -710,7 +850,7 @@ fun NowPlayingScreen(
                             }
                             Icon(
                                 imageVector = repeatIcon,
-                                contentDescription = "Repeat mode",
+                                contentDescription = "Режим повтора",
                                 tint = if (playback.repeatMode != RepeatMode.OFF) {
                                     MaterialTheme.colorScheme.primary
                                 } else {
@@ -806,12 +946,12 @@ private fun LyricsSheetContent(
             .padding(bottom = 28.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text("Lyrics", style = MaterialTheme.typography.titleLarge)
+        Text("Текст песни", style = MaterialTheme.typography.titleLarge)
 
         when (lyricsState) {
             LyricsUiState.Idle -> {
                 Text(
-                    text = "Play a track to load synced lyrics.",
+                    text = "Включите трек для загрузки синхронизированного текста.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -842,7 +982,7 @@ private fun LyricsSheetContent(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     TextButton(onClick = onRetry) {
-                        Text("Retry")
+                        Text("Повторить")
                     }
                 }
             }
