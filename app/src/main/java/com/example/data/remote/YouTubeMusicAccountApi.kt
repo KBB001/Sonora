@@ -88,11 +88,23 @@ class YouTubeMusicAccountApi @Inject constructor(
     suspend fun fetchLikedTracks(account: YouTubeAccount): Result<List<Track>> =
         withContext(Dispatchers.IO) {
             runCatching {
-                val primary = browseTrackCollection(account, browseId = "FEmusic_liked_videos")
-                if (primary.isNotEmpty()) {
-                    primary
-                } else {
+                val primary = runCatching {
+                    browseTrackCollection(account, browseId = "FEmusic_liked_videos")
+                }.getOrNull()
+                if (!primary.isNullOrEmpty()) return@runCatching primary
+
+                val ytMusicLl = runCatching {
                     browseTrackCollection(account, browseId = "VLLM")
+                }.getOrNull()
+                if (!ytMusicLl.isNullOrEmpty()) return@runCatching ytMusicLl
+
+                val webLl = runCatching {
+                    browseTrackCollection(account, browseId = "VLLM", useWebClient = true)
+                }
+                when {
+                    primary != null -> primary
+                    ytMusicLl != null -> ytMusicLl
+                    else -> webLl.getOrThrow()
                 }
             }
         }
@@ -107,15 +119,32 @@ class YouTubeMusicAccountApi @Inject constructor(
     suspend fun fetchUserPlaylists(account: YouTubeAccount): Result<List<YouTubeUserPlaylist>> =
         withContext(Dispatchers.IO) {
             runCatching {
-                val responseJson = executeInnerTubePost(
+                val primary = runCatching {
+                    executeInnerTubePost(
+                        endpoint = "browse",
+                        cookieHeader = account.cookieHeader,
+                        visitorData = "",
+                        dataSyncId = account.dataSyncId,
+                        authUserIndex = account.authUserIndex,
+                        payload = JSONObject().put("browseId", "FEmusic_liked_playlists")
+                    )
+                }.map { parseUserPlaylists(it) }.getOrNull()
+                if (!primary.isNullOrEmpty()) return@runCatching primary
+
+                val fallbackJson = executeInnerTubePost(
                     endpoint = "browse",
                     cookieHeader = account.cookieHeader,
-                    visitorData = account.visitorData,
+                    visitorData = "",
                     dataSyncId = account.dataSyncId,
                     authUserIndex = account.authUserIndex,
-                    payload = JSONObject().put("browseId", "FEmusic_liked_playlists")
+                    payload = JSONObject().put("browseId", "FEmusic_library_landing")
                 )
-                parseUserPlaylists(responseJson)
+                val fallbackPlaylists = parseUserPlaylists(fallbackJson)
+                if (fallbackPlaylists.isNotEmpty() || primary == null) {
+                    fallbackPlaylists
+                } else {
+                    primary
+                }
             }
         }
 
@@ -124,7 +153,16 @@ class YouTubeMusicAccountApi @Inject constructor(
             val cleanId = playlistId.removePrefix("VL").trim()
             if (cleanId.isBlank()) return@withContext Result.success(emptyList())
             runCatching {
-                browseTrackCollection(account, browseId = "VL$cleanId", maxPages = MAX_PLAYLIST_PAGES)
+                val remix = runCatching {
+                    browseTrackCollection(account, browseId = "VL$cleanId", maxPages = MAX_PLAYLIST_PAGES)
+                }.getOrNull()
+                if (!remix.isNullOrEmpty()) return@runCatching remix
+                browseTrackCollection(
+                    account,
+                    browseId = "VL$cleanId",
+                    maxPages = MAX_PLAYLIST_PAGES,
+                    useWebClient = true
+                )
             }
         }
 
@@ -292,16 +330,18 @@ class YouTubeMusicAccountApi @Inject constructor(
     private fun browseTrackCollection(
         account: YouTubeAccount,
         browseId: String,
-        maxPages: Int = MAX_LIKED_PAGES
+        maxPages: Int = MAX_LIKED_PAGES,
+        useWebClient: Boolean = false
     ): List<Track> {
         val collected = LinkedHashMap<String, Track>()
         var json = executeInnerTubePost(
             endpoint = "browse",
             cookieHeader = account.cookieHeader,
-            visitorData = account.visitorData,
+            visitorData = "",
             dataSyncId = account.dataSyncId,
             authUserIndex = account.authUserIndex,
-            payload = JSONObject().put("browseId", browseId)
+            payload = JSONObject().put("browseId", browseId),
+            useWebClient = useWebClient
         )
         extractTracksRecursive(json).forEach { track ->
             collected.putIfAbsent(track.id, track)
@@ -310,20 +350,25 @@ class YouTubeMusicAccountApi @Inject constructor(
         var nextContinuation = extractNextContinuation(json)
         var page = 0
         while (!nextContinuation.isNullOrBlank() && page < maxPages) {
-            json = executeInnerTubePost(
-                endpoint = "browse",
-                cookieHeader = account.cookieHeader,
-                visitorData = account.visitorData,
-                dataSyncId = account.dataSyncId,
-                authUserIndex = account.authUserIndex,
-                payload = JSONObject().put("continuation", nextContinuation)
-            )
-            val newTracks = extractTracksRecursive(json)
+            val nextJson = runCatching {
+                executeInnerTubePost(
+                    endpoint = "browse",
+                    cookieHeader = account.cookieHeader,
+                    visitorData = "",
+                    dataSyncId = account.dataSyncId,
+                    authUserIndex = account.authUserIndex,
+                    payload = JSONObject().put("continuation", nextContinuation),
+                    useWebClient = useWebClient
+                )
+            }.getOrNull() ?: break
+            val newTracks = extractTracksRecursive(nextJson)
             if (newTracks.isEmpty()) break
             newTracks.forEach { track ->
                 collected.putIfAbsent(track.id, track)
             }
-            nextContinuation = extractNextContinuation(json)
+            val upcoming = extractNextContinuation(nextJson)
+            if (upcoming == nextContinuation) break
+            nextContinuation = upcoming
             page++
         }
         return collected.values.toList()
@@ -338,18 +383,58 @@ class YouTubeMusicAccountApi @Inject constructor(
         payload: JSONObject,
         useWebClient: Boolean = false
     ): JSONObject {
+        return try {
+            executeInnerTubePostOnce(
+                endpoint = endpoint,
+                cookieHeader = cookieHeader,
+                visitorData = visitorData,
+                dataSyncId = dataSyncId,
+                authUserIndex = authUserIndex,
+                payload = payload,
+                useWebClient = useWebClient
+            )
+        } catch (firstError: HttpStatusException) {
+            // Retry once with minimal clean context if stale visitorData or delegatedPageId caused HTTP 400
+            if (firstError.code == 400 && (visitorData.isNotBlank() || dataSyncId.isNotBlank())) {
+                executeInnerTubePostOnce(
+                    endpoint = endpoint,
+                    cookieHeader = cookieHeader,
+                    visitorData = "",
+                    dataSyncId = "",
+                    authUserIndex = authUserIndex,
+                    payload = payload,
+                    useWebClient = useWebClient
+                )
+            } else {
+                throw firstError
+            }
+        }
+    }
+
+    private fun executeInnerTubePostOnce(
+        endpoint: String,
+        cookieHeader: String,
+        visitorData: String,
+        dataSyncId: String,
+        authUserIndex: Int,
+        payload: JSONObject,
+        useWebClient: Boolean
+    ): JSONObject {
         val origin = if (useWebClient) YOUTUBE_WEB_ORIGIN else YOUTUBE_MUSIC_ORIGIN
         val clientName = if (useWebClient) "WEB" else "WEB_REMIX"
         val clientId = if (useWebClient) "1" else "67"
         val clientVersion = if (useWebClient) "2.20250310.01.00" else "1.20250310.01.00"
+        val cleanVisitorData = visitorData.trim().takeIf {
+            it.isNotBlank() && !it.contains('%') && !it.contains(' ')
+        }.orEmpty()
 
         val clientJson = JSONObject().apply {
             put("clientName", clientName)
             put("clientVersion", clientVersion)
             put("hl", "ru")
             put("gl", "RU")
-            if (visitorData.isNotBlank()) {
-                put("visitorData", visitorData)
+            if (cleanVisitorData.isNotBlank() && endpoint == "player") {
+                put("visitorData", cleanVisitorData)
             }
         }
         val contextJson = JSONObject().put("client", clientJson)
@@ -380,12 +465,11 @@ class YouTubeMusicAccountApi @Inject constructor(
             .header("X-Origin", origin)
             .header("X-Youtube-Client-Name", clientId)
             .header("X-Youtube-Client-Version", clientVersion)
-            .header("X-Youtube-Bootstrap-Logged-In", "true")
             .header("X-Goog-AuthUser", authUserIndex.coerceAtLeast(0).toString())
             .post(fullBody.toRequestBody("application/json; charset=utf-8".toMediaType()))
 
-        if (visitorData.isNotBlank()) {
-            requestBuilder.header("X-Goog-Visitor-Id", visitorData)
+        if (cleanVisitorData.isNotBlank() && endpoint == "player") {
+            requestBuilder.header("X-Goog-Visitor-Id", cleanVisitorData)
         }
         if (delegatedPageId != null) {
             requestBuilder.header("X-Goog-PageId", delegatedPageId)
@@ -395,14 +479,27 @@ class YouTubeMusicAccountApi @Inject constructor(
             val raw = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
                 if (response.code == 401 || response.code == 403) {
-                    throw IOException("Сессия YouTube истекла или отклонена (HTTP ${response.code}). Войдите заново.")
+                    throw HttpStatusException(
+                        response.code,
+                        "Сессия YouTube истекла или отклонена (HTTP ${response.code}). Войдите заново."
+                    )
                 }
-                throw IOException("Ошибка YouTube API (${response.code})")
+                val detail = runCatching {
+                    JSONObject(raw).optJSONObject("error")?.optString("message").orEmpty()
+                }.getOrDefault("")
+                val msg = if (detail.isNotBlank()) {
+                    "Ошибка YouTube API (${response.code}): $detail"
+                } else {
+                    "Ошибка YouTube API (${response.code})"
+                }
+                throw HttpStatusException(response.code, msg)
             }
             if (raw.isBlank()) return JSONObject()
             return JSONObject(raw)
         }
     }
+
+    private class HttpStatusException(val code: Int, message: String) : IOException(message)
 
     private fun pickBestAudioUrl(array: JSONArray, audioQuality: AudioQuality): String? {
         val candidates = mutableListOf<Triple<String, String, Long>>()
@@ -582,6 +679,14 @@ class YouTubeMusicAccountApi @Inject constructor(
                     parseTwoRowTrack(item)?.let { tracks += it }
                 }
             }
+
+            if (tracks.isEmpty()) {
+                val playlistVideoItems = mutableListOf<JSONObject>()
+                collectObjectsByKey(root, "playlistVideoRenderer", playlistVideoItems)
+                playlistVideoItems.forEach { item ->
+                    parsePlaylistVideoRenderer(item)?.let { tracks += it }
+                }
+            }
             return tracks.distinctBy { it.id }
         }
 
@@ -759,10 +864,43 @@ class YouTubeMusicAccountApi @Inject constructor(
             )
         }
 
-        private fun extractNextContinuation(root: JSONObject): String? {
-            val contObj = findFirstObjectByKey(root, "nextContinuationData")
-                ?: return findFirstStringByKey(root, "continuation")
-            return contObj.optString("continuation").takeIf { it.isNotBlank() }
+        private fun parsePlaylistVideoRenderer(item: JSONObject): Track? {
+            val videoId = item.optString("videoId").takeIf { it.isNotBlank() } ?: return null
+            val title = readRunsText(item.optJSONObject("title")).ifBlank { return null }
+            val artist = readRunsText(item.optJSONObject("shortBylineText"))
+                .ifBlank { "YouTube Artist" }
+            val durationSeconds = item.optString("lengthSeconds").toLongOrNull()
+                ?: parseDurationSeconds(readRunsText(item.optJSONObject("lengthText")))
+            val thumb = item.optJSONObject("thumbnail")
+                ?.optJSONArray("thumbnails")
+                ?.let { pickLargestThumbnailUrl(it) }
+                ?.takeIf { it.isNotBlank() }
+                ?: "https://i.ytimg.com/vi/$videoId/hqdefault.jpg"
+            return Track(
+                id = videoId,
+                title = title,
+                artist = artist,
+                durationSeconds = durationSeconds,
+                thumbnailUrl = thumb
+            )
+        }
+
+        fun extractNextContinuation(root: JSONObject): String? {
+            findFirstObjectByKey(root, "nextContinuationData")
+                ?.optString("continuation")
+                ?.takeIf { it.isNotBlank() }
+                ?.let { return it }
+
+            val contRenderers = mutableListOf<JSONObject>()
+            collectObjectsByKey(root, "continuationItemRenderer", contRenderers)
+            for (renderer in contRenderers) {
+                val token = renderer.optJSONObject("continuationEndpoint")
+                    ?.optJSONObject("continuationCommand")
+                    ?.optString("token")
+                    ?.takeIf { it.isNotBlank() }
+                if (token != null) return token
+            }
+            return null
         }
 
         private fun parseDurationSeconds(raw: String): Long {

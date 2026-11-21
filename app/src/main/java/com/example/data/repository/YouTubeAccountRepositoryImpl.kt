@@ -266,21 +266,38 @@ class YouTubeAccountRepositoryImpl @Inject constructor(
             stage = "${progressPrefix}Загрузка понравившихся треков...",
             progress = progressStart + progressSpan * 0.15f
         )
-        val likedTracks = api.fetchLikedTracks(account).getOrThrow()
-        val importedLiked = libraryRepository.mergeFavoriteTracks(likedTracks)
+        val likedResult = api.fetchLikedTracks(account)
+        val likedTracks = likedResult.getOrDefault(emptyList())
+        val importedLiked = if (likedTracks.isNotEmpty()) {
+            libraryRepository.mergeFavoriteTracks(likedTracks)
+        } else {
+            0
+        }
 
         _syncState.value = AccountSyncState.Syncing(
             stage = "${progressPrefix}Загрузка истории прослушиваний...",
             progress = progressStart + progressSpan * 0.35f
         )
-        val historyTracks = api.fetchHistoryTracks(account).getOrDefault(emptyList())
-        val importedHistory = libraryRepository.mergeHistoryTracks(historyTracks)
+        val historyResult = api.fetchHistoryTracks(account)
+        val historyTracks = historyResult.getOrDefault(emptyList())
+        val importedHistory = if (historyTracks.isNotEmpty()) {
+            libraryRepository.mergeHistoryTracks(historyTracks)
+        } else {
+            0
+        }
 
         _syncState.value = AccountSyncState.Syncing(
             stage = "${progressPrefix}Импорт плейлистов YouTube...",
             progress = progressStart + progressSpan * 0.55f
         )
-        val remotePlaylists = api.fetchUserPlaylists(account).getOrDefault(emptyList())
+        val playlistsResult = api.fetchUserPlaylists(account)
+        if (likedResult.isFailure && historyResult.isFailure && playlistsResult.isFailure) {
+            throw (likedResult.exceptionOrNull()
+                ?: playlistsResult.exceptionOrNull()
+                ?: historyResult.exceptionOrNull()
+                ?: IllegalStateException("Не удалось загрузить данные YouTube"))
+        }
+        val remotePlaylists = playlistsResult.getOrDefault(emptyList())
         var importedPlaylistsCount = 0
         val remotePlaylistsMap = LinkedHashMap<String, List<String>>()
 

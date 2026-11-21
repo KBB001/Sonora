@@ -94,6 +94,50 @@ class ExampleRobolectricTest {
     assertEquals("PL1234567890", playlists[0].playlistId)
     assertEquals("Road Trip", playlists[0].title)
     assertEquals(18, playlists[0].trackCount)
+
+    // Must ignore reloadContinuationData and only extract real pagination tokens
+    val reloadOnlyJson = JSONObject(
+      """
+      {
+        "reloadContinuationData": {"continuation": "BAD_RELOAD_TOKEN"}
+      }
+      """.trimIndent()
+    )
+    org.junit.Assert.assertNull(YouTubeMusicAccountApi.extractNextContinuation(reloadOnlyJson))
+
+    val commandContJson = JSONObject(
+      """
+      {
+        "continuationItemRenderer": {
+          "continuationEndpoint": {
+            "continuationCommand": {"token": "NEXT_PAGE_TOKEN_42"}
+          }
+        }
+      }
+      """.trimIndent()
+    )
+    assertEquals("NEXT_PAGE_TOKEN_42", YouTubeMusicAccountApi.extractNextContinuation(commandContJson))
+
+    val webPlaylistJson = JSONObject(
+      """
+      {
+        "items": [{
+          "playlistVideoRenderer": {
+            "videoId": "abc123XYZ00",
+            "title": {"runs": [{"text": "Web Liked Song"}]},
+            "shortBylineText": {"runs": [{"text": "Web Artist"}]},
+            "lengthSeconds": "195"
+          }
+        }]
+      }
+      """.trimIndent()
+    )
+    val webTracks = YouTubeMusicAccountApi.extractTracksRecursive(webPlaylistJson)
+    assertEquals(1, webTracks.size)
+    assertEquals("abc123XYZ00", webTracks[0].id)
+    assertEquals("Web Liked Song", webTracks[0].title)
+    assertEquals("Web Artist", webTracks[0].artist)
+    assertEquals(195L, webTracks[0].durationSeconds)
   }
 
   @Test
