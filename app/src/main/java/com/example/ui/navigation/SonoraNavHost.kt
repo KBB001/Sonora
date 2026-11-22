@@ -9,9 +9,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -163,7 +165,15 @@ fun SonoraNavHost(
             snackbarHost = {
                 SnackbarHost(
                     hostState = snackbarHostState,
-                    modifier = Modifier.navigationBarsPadding()
+                    modifier = Modifier
+                        .navigationBarsPadding()
+                        .padding(
+                            bottom = if (useNavigationRail && playbackState.currentTrack != null && !isFullScreenOverlay) {
+                                84.dp
+                            } else {
+                                0.dp
+                            }
+                        )
                 )
             },
             bottomBar = {
@@ -274,9 +284,12 @@ fun SonoraNavHost(
                             .weight(1f)
                             .fillMaxSize()
                     ) {
+                        val navBarBottom = WindowInsets.navigationBars
+                            .asPaddingValues()
+                            .calculateBottomPadding()
                         val contentPadding = if (useNavigationRail) {
                             PaddingValues(
-                                bottom = if (playbackState.currentTrack != null) 88.dp else 16.dp
+                                bottom = navBarBottom + if (playbackState.currentTrack != null) 88.dp else 16.dp
                             )
                         } else {
                             innerPadding

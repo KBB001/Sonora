@@ -144,4 +144,47 @@ class ExampleUnitTest {
         assertTrue(blankResult.isFailure)
         assertEquals("Текст песни не найден", blankResult.exceptionOrNull()?.message)
     }
+
+    @Test
+    fun trackMoodProfiler_classifiesMoodsTempoAndComputesSimilarity() {
+        val profiler = com.example.domain.recommendation.TrackMoodProfiler()
+        val phonk = com.example.domain.model.Track(
+            id = "p1",
+            title = "Midnight Drift Phonk Gym",
+            artist = "FastArtist",
+            durationSeconds = 140,
+            thumbnailUrl = ""
+        )
+        val lofi1 = com.example.domain.model.Track(
+            id = "l1",
+            title = "Rainy Window Lofi Beats to Study",
+            artist = "ChillArtist - Topic",
+            durationSeconds = 190,
+            thumbnailUrl = ""
+        )
+        val lofi2 = com.example.domain.model.Track(
+            id = "l2",
+            title = "Warm Coffee Chillhop Instrumental",
+            artist = "OtherChill",
+            durationSeconds = 210,
+            thumbnailUrl = ""
+        )
+
+        val phonkProfile = profiler.profile(phonk)
+        val lofi1Profile = profiler.profile(lofi1)
+        val lofi2Profile = profiler.profile(lofi2)
+
+        assertEquals(com.example.domain.model.MoodCategory.WORKOUT_DRIVE, phonkProfile.mood)
+        assertEquals(com.example.domain.model.TempoTier.HIGH_ENERGY, phonkProfile.tempo)
+        assertEquals(com.example.domain.model.MoodCategory.CHILL_FOCUS, lofi1Profile.mood)
+        assertEquals("chillartist", lofi1Profile.normalizedArtist)
+
+        val sameMoodSim = profiler.similarityScore(lofi1Profile, lofi2Profile)
+        val crossMoodSim = profiler.similarityScore(lofi1Profile, phonkProfile)
+        assertTrue("Expected chill tracks similarity ($sameMoodSim) > cross mood ($crossMoodSim)", sameMoodSim > crossMoodSim)
+
+        val contrasting = profiler.contrastingMoodsFor(com.example.domain.model.MoodCategory.WORKOUT_DRIVE)
+        assertTrue(com.example.domain.model.MoodCategory.CHILL_FOCUS in contrasting)
+        assertFalse(com.example.domain.model.MoodCategory.WORKOUT_DRIVE in contrasting)
+    }
 }

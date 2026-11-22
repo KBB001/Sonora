@@ -54,6 +54,12 @@ private val SonoraLightColorScheme = lightColorScheme(
     onSurface = Color(0xFF0F172A),
     surfaceVariant = Color(0xFFE2E8F0),
     onSurfaceVariant = Color(0xFF475569),
+    surfaceContainerLowest = Color(0xFFF6F8FA),
+    surfaceContainerLow = Color(0xFFFFFFFF),
+    surfaceContainer = Color(0xFFF1F5F9),
+    surfaceContainerHigh = Color(0xFFE2E8F0),
+    surfaceContainerHighest = Color(0xFFCBD5E1),
+    outline = Color(0xFFCBD5E1),
     error = Color(0xFFDC2626)
 )
 

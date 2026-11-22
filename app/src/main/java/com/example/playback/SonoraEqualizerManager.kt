@@ -195,5 +195,6 @@ class SonoraEqualizerManager @Inject constructor(
         runCatching { equalizer?.release() }
         equalizer = null
         currentSessionId = 0
+        _state.update { it.copy(isAvailable = false) }
     }
 }

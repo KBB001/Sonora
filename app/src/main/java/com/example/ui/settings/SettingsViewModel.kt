@@ -202,6 +202,7 @@ class SettingsViewModel @Inject constructor(
                     }
                 }
             } catch (e: CancellationException) {
+                appUpdateRepository.clearCachedUpdates()
                 updateStateFlow.value = AppUpdateUiState.Idle
                 throw e
             } catch (e: Exception) {
@@ -214,6 +215,7 @@ class SettingsViewModel @Inject constructor(
     fun dismissUpdateDialog() {
         updateDownloadJob?.cancel()
         updateDownloadJob = null
+        appUpdateRepository.clearCachedUpdates()
         updateStateFlow.value = AppUpdateUiState.Idle
     }
 }

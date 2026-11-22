@@ -63,7 +63,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           KEYSTORE_FILE="${{ runner.temp }}/release-keystore.jks"
-          if [ ! -f "debug.keystore" ] && [ -f "debug.keystore.base64" ]; then
+          if [ -f "debug.keystore.base64" ]; then
             tr -d '[:space:]' < debug.keystore.base64 | base64 --decode > debug.keystore
           fi
           if [ ! -f "debug.keystore" ]; then
@@ -138,7 +138,12 @@ jobs:
             exit 1
           fi
           mkdir -p release-assets
-          cp "$APK_SRC" "release-assets/sonora-${{ steps.version.outputs.tag }}.apk"
+          OUT_APK="release-assets/sonora-${{ steps.version.outputs.tag }}.apk"
+          cp "$APK_SRC" "$OUT_APK"
+          APKSIGNER=$(find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools" -name apksigner 2>/dev/null | head -n 1 || true)
+          if [ -n "$APKSIGNER" ] && [ -x "$APKSIGNER" ]; then
+            "$APKSIGNER" verify --print-certs "$OUT_APK" || true
+          fi
 
       - name: Create GitHub Release & Upload APK
         uses: softprops/action-gh-release@v3

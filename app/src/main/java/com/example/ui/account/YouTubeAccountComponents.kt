@@ -184,15 +184,17 @@ fun YouTubeAccountSettingsCard(
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
-                        val syncTimeText = if (active.lastSyncTimestamp > 0L) {
-                            val fmt = DateFormat.getDateTimeInstance(
-                                DateFormat.SHORT,
-                                DateFormat.SHORT,
-                                Locale.getDefault()
-                            )
-                            "Синхр.: ${fmt.format(Date(active.lastSyncTimestamp))}"
-                        } else {
-                            "Ещё не синхронизирован"
+                        val syncTimeText = remember(active.lastSyncTimestamp) {
+                            if (active.lastSyncTimestamp > 0L) {
+                                val fmt = DateFormat.getDateTimeInstance(
+                                    DateFormat.SHORT,
+                                    DateFormat.SHORT,
+                                    Locale.getDefault()
+                                )
+                                "Синхр.: ${fmt.format(Date(active.lastSyncTimestamp))}"
+                            } else {
+                                "Ещё не синхронизирован"
+                            }
                         }
                         Text(
                             text = syncTimeText,
@@ -227,13 +229,19 @@ fun YouTubeAccountSettingsCard(
                                 },
                                 trailingIcon = if (!isSelected) {
                                     {
-                                        Icon(
-                                            imageVector = Icons.Rounded.Close,
-                                            contentDescription = "Удалить ${account.name}",
+                                        Box(
+                                            contentAlignment = Alignment.Center,
                                             modifier = Modifier
-                                                .size(16.dp)
+                                                .size(28.dp)
+                                                .clip(CircleShape)
                                                 .clickable { onRemoveAccount(account.id) }
-                                        )
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.Close,
+                                                contentDescription = "Удалить ${account.name}",
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
                                     }
                                 } else {
                                     null

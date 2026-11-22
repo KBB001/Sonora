@@ -95,7 +95,7 @@ fun MiniPlayerBar(
                     ) {
                         AsyncImage(
                             model = imageRequest,
-                            contentDescription = "${track.title} artwork",
+                            contentDescription = "Обложка ${track.title}",
                             placeholder = painterResource(R.drawable.img_default_cover),
                             error = painterResource(R.drawable.img_default_cover),
                             contentScale = ContentScale.Crop,

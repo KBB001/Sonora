@@ -7,12 +7,14 @@ import com.example.data.local.dao.FavoriteDao
 import com.example.data.local.dao.HistoryDao
 import com.example.data.local.dao.PlaylistDao
 import com.example.data.local.dao.SearchHistoryDao
+import com.example.data.local.dao.TrackSignalDao
 import com.example.data.local.entity.DownloadedTrackEntity
 import com.example.data.local.entity.FavoriteTrackEntity
 import com.example.data.local.entity.HistoryTrackEntity
 import com.example.data.local.entity.PlaylistEntity
 import com.example.data.local.entity.PlaylistTrackEntity
 import com.example.data.local.entity.SearchHistoryEntity
+import com.example.data.local.entity.TrackAffinityEntity
 
 @Database(
     entities = [
@@ -21,9 +23,10 @@ import com.example.data.local.entity.SearchHistoryEntity
         PlaylistEntity::class,
         PlaylistTrackEntity::class,
         DownloadedTrackEntity::class,
-        SearchHistoryEntity::class
+        SearchHistoryEntity::class,
+        TrackAffinityEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class SonoraDatabase : RoomDatabase() {
@@ -32,4 +35,5 @@ abstract class SonoraDatabase : RoomDatabase() {
     abstract fun playlistDao(): PlaylistDao
     abstract fun downloadedTrackDao(): DownloadedTrackDao
     abstract fun searchHistoryDao(): SearchHistoryDao
+    abstract fun trackSignalDao(): TrackSignalDao
 }

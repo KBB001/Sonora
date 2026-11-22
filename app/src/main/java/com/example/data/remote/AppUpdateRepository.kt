@@ -212,6 +212,12 @@ class AppUpdateRepository @Inject constructor(
         }
     }.flowOn(Dispatchers.IO)
 
+    fun clearCachedUpdates() {
+        runCatching {
+            File(context.cacheDir, "updates").listFiles()?.forEach { it.delete() }
+        }
+    }
+
     private data class ApkAsset(
         val name: String,
         val downloadUrl: String,
@@ -219,6 +225,7 @@ class AppUpdateRepository @Inject constructor(
     )
 
     private fun findApkAsset(assets: JSONArray): ApkAsset? {
+        var firstApk: ApkAsset? = null
         var fallbackAsset: ApkAsset? = null
         for (i in 0 until assets.length()) {
             val item = assets.optJSONObject(i) ?: continue
@@ -228,13 +235,18 @@ class AppUpdateRepository @Inject constructor(
             if (url.isBlank() || !isTrustedDownloadUrl(url)) continue
             val asset = ApkAsset(name = name, downloadUrl = url, size = size)
             if (name.endsWith(".apk", ignoreCase = true)) {
-                return asset
+                if (!name.contains("debug", ignoreCase = true)) {
+                    return asset
+                }
+                if (firstApk == null) {
+                    firstApk = asset
+                }
             }
             if (fallbackAsset == null) {
                 fallbackAsset = asset
             }
         }
-        return fallbackAsset
+        return firstApk ?: fallbackAsset
     }
 
     private fun isTrustedDownloadUrl(url: String): Boolean {

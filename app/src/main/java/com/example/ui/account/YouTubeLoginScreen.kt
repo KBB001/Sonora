@@ -58,6 +58,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.remote.YouTubeMusicAccountApi
 import com.example.ui.components.SonoraIcons
 import org.json.JSONObject
+import org.json.JSONTokener
 
 private const val YOUTUBE_LOGIN_URL =
     "https://accounts.google.com/ServiceLogin?service=youtube&uilel=3&passive=true&continue=https%3A%2F%2Fmusic.youtube.com%2F&hl=ru"
@@ -151,13 +152,16 @@ fun YouTubeLoginScreen(
 
         if (view != null) {
             view.evaluateJavascript(script) { raw ->
-                val cleaned = raw
-                    ?.trim()
-                    ?.removeSurrounding("\"")
-                    ?.replace("\\\"", "\"")
-                    ?.replace("\\\\", "\\")
-                    .orEmpty()
-                val json = runCatching { JSONObject(cleaned) }.getOrNull()
+                val json = runCatching {
+                    val value = raw?.takeIf { it.isNotBlank() && it != "null" }?.let {
+                        JSONTokener(it).nextValue()
+                    }
+                    when (value) {
+                        is JSONObject -> value
+                        is String -> JSONObject(value)
+                        else -> null
+                    }
+                }.getOrNull()
                 val loggedInFlag = json?.optBoolean("loggedIn", true) ?: true
                 if (!manualTrigger && json != null && json.has("loggedIn") && !loggedInFlag) {
                     hasCapturedLogin = false
@@ -329,9 +333,9 @@ fun YouTubeLoginScreen(
                                     val finishedUrl = url.orEmpty()
                                     currentUrl = finishedUrl
                                     canGoBack = view?.canGoBack() == true
-                                    val isYouTubeDomain = finishedUrl.contains("music.youtube.com") ||
-                                        finishedUrl.contains("www.youtube.com")
-                                    if (isYouTubeDomain && !finishedUrl.contains("accounts.google.com")) {
+                                    val host = runCatching { android.net.Uri.parse(finishedUrl).host?.lowercase() }.getOrNull()
+                                    val isYouTubeDomain = host == "music.youtube.com" || host == "www.youtube.com"
+                                    if (isYouTubeDomain) {
                                         tryFinalizeLogin(view, manualTrigger = false)
                                     }
                                 }

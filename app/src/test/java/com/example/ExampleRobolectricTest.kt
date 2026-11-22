@@ -166,7 +166,10 @@ class ExampleRobolectricTest {
       com.example.data.local.SonoraDatabase::class.java,
       dbName
     )
-      .addMigrations(com.example.di.DatabaseModule.MIGRATION_2_3)
+      .addMigrations(
+        com.example.di.DatabaseModule.MIGRATION_2_3,
+        com.example.di.DatabaseModule.MIGRATION_3_4
+      )
       .allowMainThreadQueries()
       .build()
 
@@ -280,7 +283,8 @@ class ExampleRobolectricTest {
     )
       .addMigrations(
         com.example.di.DatabaseModule.MIGRATION_1_2,
-        com.example.di.DatabaseModule.MIGRATION_2_3
+        com.example.di.DatabaseModule.MIGRATION_2_3,
+        com.example.di.DatabaseModule.MIGRATION_3_4
       )
       .allowMainThreadQueries()
       .build()
@@ -508,5 +512,281 @@ class ExampleRobolectricTest {
     assertEquals("", parsed?.handle)
     assertEquals("", parsed?.email)
     assertEquals("https://yt3.ggpht.com/avatar.jpg", parsed?.avatarUrl)
+  }
+
+  @Test
+  fun `mergePlaylist matches Cyrillic playlist names case-insensitively without duplicates`() = kotlinx.coroutines.runBlocking {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val db = androidx.room.Room.inMemoryDatabaseBuilder(
+      context,
+      com.example.data.local.SonoraDatabase::class.java
+    ).allowMainThreadQueries().build()
+
+    try {
+      val repo = com.example.data.repository.LibraryRepositoryImpl(
+        favoriteDao = db.favoriteDao(),
+        historyDao = db.historyDao(),
+        playlistDao = db.playlistDao(),
+        downloadedTrackDao = db.downloadedTrackDao(),
+        searchHistoryDao = db.searchHistoryDao(),
+        context = context
+      )
+      val t1 = com.example.domain.model.Track("cy_1", "Песня 1", "Группа А", 180, "")
+      val t2 = com.example.domain.model.Track("cy_2", "Песня 2", "Группа Б", 200, "")
+
+      val id1 = repo.createPlaylist("Рок-н-ролл", "Первый", listOf(t1))
+      val (mergedPlaylistId, addedCount) = repo.mergePlaylist(
+        name = "рок-н-ролл",
+        description = "Дубликат",
+        tracks = listOf(t2)
+      )
+
+      assertEquals(id1, mergedPlaylistId)
+      assertEquals(1, addedCount)
+      val all = repo.getAllPlaylistsWithTracks()
+      assertEquals(1, all.size)
+      assertEquals(2, all.first().second.size)
+    } finally {
+      db.close()
+    }
+  }
+
+  @Test
+  fun `playbackPersistenceStore sanitizes blank track fields to Russian defaults`() = kotlinx.coroutines.runBlocking {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val store = com.example.data.repository.PlaybackPersistenceStore(context)
+    val blankTrack = com.example.domain.model.Track(
+      id = "blank_1",
+      title = "   ",
+      artist = "",
+      durationSeconds = -10,
+      thumbnailUrl = "  "
+    )
+    store.savePlaybackState(
+      com.example.domain.model.PersistedPlaybackState(
+        queue = listOf(blankTrack),
+        currentIndex = 5,
+        positionMs = -500L,
+        playbackSpeed = 5.0f
+      )
+    )
+    val restored = store.readPlaybackState()!!
+    assertEquals(1, restored.queue.size)
+    assertEquals("Без названия", restored.queue.first().title)
+    assertEquals("Неизвестный исполнитель", restored.queue.first().artist)
+    assertEquals(0L, restored.queue.first().durationSeconds)
+    assertEquals(0, restored.currentIndex)
+    assertEquals(0L, restored.positionMs)
+    assertEquals(2.0f, restored.playbackSpeed)
+  }
+
+  @Test
+  fun `equalizerManager release resets availability flag`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val store = com.example.data.repository.PlaybackPersistenceStore(context)
+    val manager = com.example.playback.SonoraEqualizerManager(store)
+    manager.release()
+    org.junit.Assert.assertFalse(manager.state.value.isAvailable)
+  }
+
+  @Test
+  fun `appUpdateRepository clearCachedUpdates removes staged apk files`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val updatesDir = java.io.File(context.cacheDir, "updates").apply { mkdirs() }
+    val staleApk = java.io.File(updatesDir, "sonora-v1.0.10.apk").apply { writeText("temp") }
+    org.junit.Assert.assertTrue(staleApk.exists())
+
+    val repo = com.example.data.remote.AppUpdateRepository(
+      context = context,
+      okHttpClient = okhttp3.OkHttpClient(),
+      networkMonitor = com.example.core.common.NetworkMonitor(context)
+    )
+    repo.clearCachedUpdates()
+
+    org.junit.Assert.assertFalse(staleApk.exists())
+    val mismatch = com.example.core.common.ApkInstallCompatibility.SignatureMismatch(
+      installedCertFingerprint = "AA:BB:CC:DD:EE:FF",
+      archiveCertFingerprint = "CF:32:4B:E4:39:93"
+    )
+    assertEquals("AA:BB:CC:DD:EE:FF", mismatch.installedCertFingerprint)
+    assertEquals("CF:32:4B:E4:39:93", mismatch.archiveCertFingerprint)
+  }
+
+  @Test
+  fun `room migration 3 to 4 preserves favorites playlists and adds track_affinities table`() = kotlinx.coroutines.runBlocking {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val dbName = "migration_v3_v4_${System.nanoTime()}.db"
+    val helper = object : android.database.sqlite.SQLiteOpenHelper(context, dbName, null, 3) {
+      override fun onCreate(db: android.database.sqlite.SQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS `favorite_tracks` (`id` TEXT NOT NULL, `title` TEXT NOT NULL, `artist` TEXT NOT NULL, `durationSeconds` INTEGER NOT NULL, `thumbnailUrl` TEXT NOT NULL, `addedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `history_tracks` (`id` TEXT NOT NULL, `title` TEXT NOT NULL, `artist` TEXT NOT NULL, `durationSeconds` INTEGER NOT NULL, `thumbnailUrl` TEXT NOT NULL, `playedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `playlists` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `name` TEXT NOT NULL, `description` TEXT NOT NULL, `coverUrl` TEXT, `createdAt` INTEGER NOT NULL, `youtubePlaylistId` TEXT)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `playlist_tracks` (`playlistId` INTEGER NOT NULL, `trackId` TEXT NOT NULL, `title` TEXT NOT NULL, `artist` TEXT NOT NULL, `durationSeconds` INTEGER NOT NULL, `thumbnailUrl` TEXT NOT NULL, `addedAt` INTEGER NOT NULL, PRIMARY KEY(`playlistId`, `trackId`), FOREIGN KEY(`playlistId`) REFERENCES `playlists`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_playlist_tracks_playlistId` ON `playlist_tracks` (`playlistId`)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `downloaded_tracks` (`id` TEXT NOT NULL, `title` TEXT NOT NULL, `artist` TEXT NOT NULL, `durationSeconds` INTEGER NOT NULL, `thumbnailUrl` TEXT NOT NULL, `localFilePath` TEXT NOT NULL, `fileSizeBytes` INTEGER NOT NULL, `downloadedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `search_history` (`query` TEXT NOT NULL, `searchedAt` INTEGER NOT NULL, PRIMARY KEY(`query`))")
+        db.execSQL("INSERT INTO `favorite_tracks` VALUES ('fav_v3', 'Keep Me', 'Artist V3', 215, 'https://img.example/v3.jpg', 5000)")
+      }
+
+      override fun onUpgrade(db: android.database.sqlite.SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    }
+    helper.writableDatabase.close()
+    helper.close()
+
+    val migratedDb = androidx.room.Room.databaseBuilder(
+      context,
+      com.example.data.local.SonoraDatabase::class.java,
+      dbName
+    )
+      .addMigrations(com.example.di.DatabaseModule.MIGRATION_3_4)
+      .allowMainThreadQueries()
+      .build()
+
+    try {
+      org.junit.Assert.assertTrue(migratedDb.favoriteDao().isFavorite("fav_v3"))
+      migratedDb.trackSignalDao().upsertAffinity(
+        com.example.data.local.entity.TrackAffinityEntity(
+          trackId = "fav_v3",
+          normalizedArtist = "artist v3",
+          moodName = com.example.domain.model.MoodCategory.GENERAL.name,
+          tempoName = com.example.domain.model.TempoTier.MEDIUM.name,
+          completedCount = 2,
+          affinityScore = 3.0f
+        )
+      )
+      val loaded = migratedDb.trackSignalDao().getAffinity("fav_v3")
+      assertEquals(2, loaded?.completedCount)
+      assertEquals(3.0f, loaded?.affinityScore ?: 0f, 0.01f)
+    } finally {
+      migratedDb.close()
+      context.deleteDatabase(dbName)
+    }
+  }
+
+  @Test
+  fun `tasteSignalTracker adapts preferences from repeats completions and quick skips`() = kotlinx.coroutines.runBlocking {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val db = androidx.room.Room.inMemoryDatabaseBuilder(
+      context,
+      com.example.data.local.SonoraDatabase::class.java
+    ).allowMainThreadQueries().build()
+
+    try {
+      val profiler = com.example.domain.recommendation.TrackMoodProfiler()
+      val tracker = com.example.domain.recommendation.TasteSignalTracker(db.trackSignalDao(), profiler)
+
+      val loved = com.example.domain.model.Track(
+        id = "love_1",
+        title = "Ambient Piano Focus",
+        artist = "CalmMaker",
+        durationSeconds = 220,
+        thumbnailUrl = ""
+      )
+      val skipped = com.example.domain.model.Track(
+        id = "skip_1",
+        title = "Hardstyle Phonk Bass",
+        artist = "LoudMaker",
+        durationSeconds = 150,
+        thumbnailUrl = ""
+      )
+
+      tracker.recordSignal(loved, com.example.domain.model.ImplicitSignalType.COMPLETE_PLAY)
+      tracker.recordSignal(loved, com.example.domain.model.ImplicitSignalType.REPEAT_PLAY)
+      tracker.recordSignal(skipped, com.example.domain.model.ImplicitSignalType.QUICK_SKIP)
+      tracker.recordSignal(skipped, com.example.domain.model.ImplicitSignalType.QUICK_SKIP)
+
+      val lovedBonus = tracker.getPersonalAffinityBonus(loved)
+      val skippedBonus = tracker.getPersonalAffinityBonus(skipped)
+      org.junit.Assert.assertTrue("Loved bonus should be positive: $lovedBonus", lovedBonus > 0f)
+      org.junit.Assert.assertTrue("Skipped bonus should be negative: $skippedBonus", skippedBonus < 0f)
+
+      val persisted = db.trackSignalDao().getAffinity("love_1")
+      assertEquals(1, persisted?.completedCount)
+      assertEquals(1, persisted?.repeatCount)
+    } finally {
+      db.close()
+    }
+  }
+
+  @Test
+  fun `smartRecommendationEngine deduplicates per session allows same artist and softly shifts skipped moods`() = kotlinx.coroutines.runBlocking {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val db = androidx.room.Room.inMemoryDatabaseBuilder(
+      context,
+      com.example.data.local.SonoraDatabase::class.java
+    ).allowMainThreadQueries().build()
+
+    try {
+      val profiler = com.example.domain.recommendation.TrackMoodProfiler()
+      val tracker = com.example.domain.recommendation.TasteSignalTracker(db.trackSignalDao(), profiler)
+      val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+      val caps = org.robolectric.shadows.ShadowNetworkCapabilities.newInstance()
+      val shadowCaps = org.robolectric.Shadows.shadowOf(caps)
+      shadowCaps.addCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+      shadowCaps.addCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+      shadowCaps.addCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+      org.robolectric.Shadows.shadowOf(cm).setNetworkCapabilities(cm.activeNetwork, caps)
+
+      val networkMonitor = com.example.core.common.NetworkMonitor(context)
+      val seed = com.example.domain.model.Track("seed", "Night Lofi Study", "Studio A", 200, "")
+      val phonk1 = com.example.domain.model.Track("ph1", "Drift Phonk Gym", "Artist P", 140, "")
+      val phonk2 = com.example.domain.model.Track("ph2", "Hardstyle Bass Workout", "Artist P", 145, "")
+      val acoustic1 = com.example.domain.model.Track("ac1", "Warm Acoustic Guitar", "Studio A", 210, "")
+      val chill1 = com.example.domain.model.Track("ch1", "Soft Chillhop Beats", "Studio A", 205, "")
+
+      val fakeRepo = object : com.example.domain.repository.YouTubeRepository {
+        override suspend fun searchTracks(query: String): Result<List<com.example.domain.model.Track>> =
+          Result.success(listOf(chill1, acoustic1))
+
+        override suspend fun searchPlaylists(query: String): Result<List<com.example.domain.model.YouTubePlaylistSummary>> =
+          Result.success(emptyList())
+
+        override suspend fun searchArtists(query: String): Result<List<com.example.domain.model.YouTubeArtistSummary>> =
+          Result.success(emptyList())
+
+        override suspend fun getArtistTracks(channelUrl: String): Result<List<com.example.domain.model.Track>> =
+          Result.success(emptyList())
+
+        override suspend fun getSearchSuggestions(query: String): List<String> = emptyList()
+
+        override suspend fun getAudioStreamUrl(videoId: String, audioQuality: com.example.domain.model.AudioQuality, forceRefresh: Boolean) =
+          Result.success("https://example.com/$videoId.m4a")
+
+        override suspend fun getRelatedTracks(videoId: String): Result<List<com.example.domain.model.Track>> =
+          Result.success(listOf(phonk1, phonk2, chill1, acoustic1))
+
+        override suspend fun getPlaylistTracks(playlistUrl: String): Result<List<com.example.domain.model.Track>> =
+          Result.success(emptyList())
+
+        override suspend fun getPlaylistWithTitle(playlistUrl: String): Result<Pair<String, List<com.example.domain.model.Track>>> =
+          Result.success("" to emptyList())
+      }
+
+      val engine = com.example.domain.recommendation.SmartRecommendationEngine(
+        moodProfiler = profiler,
+        tasteSignalTracker = tracker,
+        youTubeRepository = fakeRepo,
+        networkMonitor = networkMonitor
+      )
+
+      // Session dedup excludes already-heard track without capping same artist
+      engine.markHeardInSession(phonk1.id)
+      val generated = engine.generateNextQueueTracks(seedTrack = seed, targetCount = 10)
+      org.junit.Assert.assertFalse(generated.any { it.id == phonk1.id })
+      // Both Studio A tracks (chill1, acoustic1) can appear together with no hard artist streak block
+      assertEquals(2, generated.count { it.artist == "Studio A" })
+
+      // Soft real-time queue re-ranking keeps ALL existing upcoming tracks (no wipe) while shifting skipped mood down
+      val existingUpcoming = listOf(phonk1, phonk2, acoustic1, chill1)
+      val reranked = engine.softRerankUpcoming(
+        upcomingTracks = existingUpcoming,
+        seedTrack = seed,
+        recentSkippedTracks = listOf(phonk1, phonk2)
+      )
+      assertEquals(existingUpcoming.size, reranked.size)
+      org.junit.Assert.assertTrue(reranked.first().id in setOf(acoustic1.id, chill1.id))
+    } finally {
+      db.close()
+    }
   }
 }

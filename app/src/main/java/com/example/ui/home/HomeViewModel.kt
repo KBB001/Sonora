@@ -10,6 +10,7 @@ import com.example.domain.model.PlaybackState
 import com.example.domain.model.Playlist
 import com.example.domain.model.Track
 import com.example.domain.model.YouTubeAccount
+import com.example.domain.recommendation.TasteSignalTracker
 import com.example.domain.repository.LibraryRepository
 import com.example.domain.repository.YouTubeAccountRepository
 import com.example.domain.repository.YouTubeRepository
@@ -80,7 +81,8 @@ class HomeViewModel @Inject constructor(
     private val playbackManager: PlaybackManager,
     private val trackDownloadManager: TrackDownloadManager,
     private val youTubeAccountRepository: YouTubeAccountRepository,
-    private val networkMonitor: NetworkMonitor
+    private val networkMonitor: NetworkMonitor,
+    private val tasteSignalTracker: TasteSignalTracker
 ) : ViewModel() {
 
     private val selectedMood = MutableStateFlow(HomeUiState.MOOD_CHIPS.first())
@@ -108,10 +110,12 @@ class HomeViewModel @Inject constructor(
         @Suppress("UNCHECKED_CAST")
         val downloads = values[4] as List<Track>
         val quickPicks = buildList {
-            addAll(favorites.take(4))
-            addAll(history.take(6))
-            addAll(downloads.take(4))
-        }.distinctBy { it.id }.take(6)
+            addAll(favorites.take(6))
+            addAll(history.take(8))
+            addAll(downloads.take(6))
+        }.distinctBy { it.id }
+            .sortedByDescending { tasteSignalTracker.getPersonalAffinityBonus(it) }
+            .take(6)
 
         @Suppress("UNCHECKED_CAST")
         HomeUiState(
@@ -162,7 +166,16 @@ class HomeViewModel @Inject constructor(
             discoverState.value = DiscoverUiState.Loading
             youTubeRepository.searchTracks(HomeUiState.toSearchQuery(mood)).fold(
                 onSuccess = { tracks ->
-                    discoverState.value = DiscoverUiState.Success(tracks.take(15))
+                    tasteSignalTracker.ensureHydrated()
+                    val ranked = tracks.take(15)
+                        .withIndex()
+                        .sortedByDescending { (idx, track) ->
+                            // Blend subtle personal affinity with YouTube search relevance order
+                            val relevanceScore = (15 - idx) * 0.05f
+                            relevanceScore + tasteSignalTracker.getPersonalAffinityBonus(track)
+                        }
+                        .map { it.value }
+                    discoverState.value = DiscoverUiState.Success(ranked)
                 },
                 onFailure = { error ->
                     discoverState.value = DiscoverUiState.Error(

@@ -144,14 +144,41 @@ class BackupCoordinator @Inject constructor(
                     put(MediaStore.Downloads.DISPLAY_NAME, AUTO_BACKUP_FILE_NAME)
                     put(MediaStore.Downloads.MIME_TYPE, "application/json")
                     put(MediaStore.Downloads.RELATIVE_PATH, relativePath)
+                    put(MediaStore.Downloads.IS_PENDING, 1)
                 }
                 val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
                     ?: error("Не удалось создать файл резервной копии в Загрузках")
-                resolver.openOutputStream(uri, "w")?.use { out ->
-                    out.write(jsonBytes)
-                    out.flush()
-                } ?: error("Не удалось записать файл резервной копии")
-                "Downloads/Sonora/$AUTO_BACKUP_FILE_NAME"
+                try {
+                    resolver.openOutputStream(uri, "w")?.use { out ->
+                        out.write(jsonBytes)
+                        out.flush()
+                    } ?: error("Не удалось записать файл резервной копии")
+
+                    val readyValues = ContentValues().apply {
+                        put(MediaStore.Downloads.IS_PENDING, 0)
+                    }
+                    resolver.update(uri, readyValues, null, null)
+                } catch (e: Throwable) {
+                    runCatching { resolver.delete(uri, null, null) }
+                    throw e
+                }
+
+                val actualName = resolver.query(
+                    uri,
+                    arrayOf(MediaStore.Downloads.DISPLAY_NAME),
+                    null,
+                    null,
+                    null
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val col = cursor.getColumnIndex(MediaStore.Downloads.DISPLAY_NAME)
+                        if (col >= 0) cursor.getString(col) else null
+                    } else {
+                        null
+                    }
+                }?.takeIf { it.isNotBlank() } ?: AUTO_BACKUP_FILE_NAME
+
+                "Downloads/Sonora/$actualName"
             } else {
                 @Suppress("DEPRECATION")
                 val downloadsDir = File(

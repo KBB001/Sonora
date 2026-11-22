@@ -91,8 +91,8 @@ class PlaybackPersistenceStore @Inject constructor(
 
     private fun sanitizeTrack(track: Track): Track = track.copy(
         id = track.id.trim().take(64),
-        title = track.title.trim().take(240).ifBlank { "Untitled Track" },
-        artist = track.artist.trim().take(200).ifBlank { "Unknown Artist" },
+        title = track.title.trim().take(240).ifBlank { "Без названия" },
+        artist = track.artist.trim().take(200).ifBlank { "Неизвестный исполнитель" },
         durationSeconds = track.durationSeconds.coerceAtLeast(0L),
         thumbnailUrl = track.thumbnailUrl.trim(),
         streamUrl = null

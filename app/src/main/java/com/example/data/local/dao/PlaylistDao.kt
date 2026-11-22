@@ -58,6 +58,9 @@ interface PlaylistDao {
     @Query("SELECT * FROM playlists WHERE LOWER(TRIM(name)) = LOWER(TRIM(:name)) LIMIT 1")
     suspend fun findByNameIgnoreCase(name: String): PlaylistEntity?
 
+    @Query("SELECT * FROM playlists")
+    suspend fun getAllPlaylists(): List<PlaylistEntity>
+
     @Query("SELECT youtubePlaylistId FROM playlists WHERE id = :playlistId")
     suspend fun getYoutubePlaylistId(playlistId: Long): String?
 

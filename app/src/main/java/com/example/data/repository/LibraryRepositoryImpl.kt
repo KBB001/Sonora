@@ -14,10 +14,12 @@ import com.example.data.local.entity.PlaylistEntity
 import com.example.data.local.entity.PlaylistTrackEntity
 import com.example.data.local.entity.SearchHistoryEntity
 import com.example.domain.model.BackupPlaylist
+import com.example.domain.model.ImplicitSignalType
 import com.example.domain.model.LibraryBackup
 import com.example.domain.model.LibraryImportResult
 import com.example.domain.model.Playlist
 import com.example.domain.model.Track
+import com.example.domain.recommendation.TasteSignalTracker
 import com.example.domain.repository.LibraryRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -39,7 +41,8 @@ class LibraryRepositoryImpl @Inject constructor(
     private val downloadedTrackDao: DownloadedTrackDao,
     private val searchHistoryDao: SearchHistoryDao,
     private val writeThroughSync: YouTubeWriteThroughSync? = null,
-    @ApplicationContext private val context: Context? = null
+    @ApplicationContext private val context: Context? = null,
+    private val tasteSignalTracker: TasteSignalTracker? = null
 ) : LibraryRepository {
 
     private val jsonCodec = Json {
@@ -136,6 +139,7 @@ class LibraryRepositoryImpl @Inject constructor(
                 fileSizeBytes = fileSizeBytes
             )
         )
+        tasteSignalTracker?.recordSignalAsync(track, ImplicitSignalType.DOWNLOADED)
     }
 
     override suspend fun deleteDownloadedTrack(trackId: String) {
@@ -169,10 +173,12 @@ class LibraryRepositoryImpl @Inject constructor(
         return if (currentlyFavorite) {
             favoriteDao.deleteFavorite(track.id)
             writeThroughSync?.onFavoriteChanged(track.id, isFavorite = false)
+            tasteSignalTracker?.recordSignalAsync(track, ImplicitSignalType.FAVORITE_REMOVED)
             false
         } else {
             favoriteDao.insertFavorite(FavoriteTrackEntity.fromDomain(track))
             writeThroughSync?.onFavoriteChanged(track.id, isFavorite = true)
+            tasteSignalTracker?.recordSignalAsync(track, ImplicitSignalType.FAVORITE_ADDED)
             true
         }
     }
@@ -192,7 +198,7 @@ class LibraryRepositoryImpl @Inject constructor(
         youtubePlaylistId: String?
     ): Long {
         val coverUrl = initialTracks.firstOrNull()?.thumbnailUrl
-        val cleanName = name.trim().ifBlank { "Untitled Playlist" }
+        val cleanName = name.trim().ifBlank { "Плейлист без названия" }
         val cleanDesc = description.trim()
         val playlistId = playlistDao.insertPlaylist(
             PlaylistEntity(
@@ -280,10 +286,15 @@ class LibraryRepositoryImpl @Inject constructor(
         youtubePlaylistId: String?,
         tracks: List<Track>
     ): Pair<Long, Int> = withContext(Dispatchers.IO) {
+        val cleanName = name.trim().ifBlank { "Плейлист без названия" }
         val existingByRemote = youtubePlaylistId?.takeIf { it.isNotBlank() }?.let {
             playlistDao.findByYoutubePlaylistId(it)
         }
-        val existing = existingByRemote ?: playlistDao.findByNameIgnoreCase(name)
+        val existing = existingByRemote
+            ?: playlistDao.findByNameIgnoreCase(cleanName)
+            ?: playlistDao.getAllPlaylists().firstOrNull {
+                it.name.trim().equals(cleanName, ignoreCase = true)
+            }
 
         if (existing == null) {
             val newId = createPlaylist(
@@ -372,7 +383,7 @@ class LibraryRepositoryImpl @Inject constructor(
             backup.playlists
                 .take(MAX_IMPORT_PLAYLISTS)
                 .forEach { playlist ->
-                    val cleanName = playlist.name.trim().take(120).ifBlank { "Untitled Playlist" }
+                    val cleanName = playlist.name.trim().take(120).ifBlank { "Плейлист без названия" }
                     val cleanDesc = playlist.description.trim().take(500)
                     val remoteId = playlist.youtubePlaylistId?.trim()?.take(64)?.takeIf { it.isNotBlank() }
                     val validTracks = playlist.tracks
@@ -427,8 +438,8 @@ class LibraryRepositoryImpl @Inject constructor(
 
     private fun sanitizeTrack(track: Track): Track = track.copy(
         id = track.id.trim().take(64),
-        title = track.title.trim().take(240).ifBlank { "Untitled Track" },
-        artist = track.artist.trim().take(200).ifBlank { "Unknown Artist" },
+        title = track.title.trim().take(240).ifBlank { "Без названия" },
+        artist = track.artist.trim().take(200).ifBlank { "Неизвестный исполнитель" },
         durationSeconds = track.durationSeconds.coerceAtLeast(0L),
         thumbnailUrl = track.thumbnailUrl
             .trim()

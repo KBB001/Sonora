@@ -101,8 +101,13 @@ fun SettingsScreen(
             scope.launch {
                 runCatching {
                     val json = viewModel.generateBackupJson()
-                    context.contentResolver.openOutputStream(uri)?.use { stream ->
-                        stream.write(json.toByteArray(Charsets.UTF_8))
+                    withContext(Dispatchers.IO) {
+                        val stream = context.contentResolver.openOutputStream(uri)
+                            ?: error("Не удалось открыть файл для записи")
+                        stream.use { out ->
+                            out.write(json.toByteArray(Charsets.UTF_8))
+                            out.flush()
+                        }
                     }
                 }.onSuccess {
                     onShowMessage("Резервная копия экспортирована")
@@ -118,22 +123,24 @@ fun SettingsScreen(
     ) { uri ->
         if (uri != null) {
             scope.launch {
-                val json = runCatching {
-                    context.contentResolver.openInputStream(uri)?.use { stream ->
-                        val maxBytes = 10 * 1024 * 1024
-                        val buffer = ByteArray(maxBytes + 1)
-                        var totalRead = 0
-                        while (totalRead < buffer.size) {
-                            val count = stream.read(buffer, totalRead, buffer.size - totalRead)
-                            if (count <= 0) break
-                            totalRead += count
+                val json = withContext(Dispatchers.IO) {
+                    runCatching {
+                        context.contentResolver.openInputStream(uri)?.use { stream ->
+                            val maxBytes = 10 * 1024 * 1024
+                            val buffer = ByteArray(maxBytes + 1)
+                            var totalRead = 0
+                            while (totalRead < buffer.size) {
+                                val count = stream.read(buffer, totalRead, buffer.size - totalRead)
+                                if (count <= 0) break
+                                totalRead += count
+                            }
+                            if (totalRead > maxBytes) {
+                                throw IllegalArgumentException("Файл слишком большой")
+                            }
+                            String(buffer, 0, totalRead, Charsets.UTF_8)
                         }
-                        if (totalRead > maxBytes) {
-                            throw IllegalArgumentException("Файл слишком большой")
-                        }
-                        String(buffer, 0, totalRead, Charsets.UTF_8)
-                    }
-                }.getOrNull()
+                    }.getOrNull()
+                }
                 if (json.isNullOrBlank()) {
                     onShowMessage("Не удалось прочитать файл или он слишком большой")
                 } else {
@@ -182,18 +189,24 @@ fun SettingsScreen(
         }
     }
 
-    fun triggerApkInstall(file: File) {
-        when (ApkInstaller.checkInstallCompatibility(context, file)) {
-            is ApkInstallCompatibility.InvalidArchive -> {
-                onShowMessage("APK-файл повреждён или неполный. Повторите загрузку обновления.")
-                return
+    fun triggerApkInstall(file: File, bypassCompatibilityCheck: Boolean = false) {
+        if (!bypassCompatibilityCheck) {
+            when (val check = ApkInstaller.checkInstallCompatibility(context, file)) {
+                is ApkInstallCompatibility.InvalidArchive -> {
+                    onShowMessage("APK-файл повреждён или неполный. Повторите загрузку обновления.")
+                    return
+                }
+                is ApkInstallCompatibility.PackageMismatch -> {
+                    onShowMessage("Скачанный APK относится к другому пакету (${check.archivePackage}).")
+                    return
+                }
+                is ApkInstallCompatibility.SignatureMismatch,
+                is ApkInstallCompatibility.VersionDowngrade -> {
+                    onShowMessage("Этот APK нельзя установить поверх текущей версии. Сохраните его в «Загрузки» и переустановите приложение.")
+                    return
+                }
+                ApkInstallCompatibility.Compatible -> Unit
             }
-            is ApkInstallCompatibility.SignatureMismatch,
-            is ApkInstallCompatibility.VersionDowngrade -> {
-                onShowMessage("Этот APK нельзя установить поверх текущей версии. Сохраните его в «Загрузки» и переустановите приложение.")
-                return
-            }
-            ApkInstallCompatibility.Compatible -> Unit
         }
         if (ApkInstaller.canRequestPackageInstalls(context)) {
             ApkInstaller.launchApkInstaller(context, file).onFailure { err ->
@@ -320,6 +333,8 @@ fun SettingsScreen(
                                 "Файл сохранён в «Загрузки»"
                             compatibility is ApkInstallCompatibility.InvalidArchive ->
                                 "Повреждённый APK-файл"
+                            compatibility is ApkInstallCompatibility.PackageMismatch ->
+                                "Неверный пакет APK"
                             compatibility is ApkInstallCompatibility.SignatureMismatch ->
                                 "Требуется переустановка (${updateState.info.tagName})"
                             compatibility is ApkInstallCompatibility.VersionDowngrade ->
@@ -334,14 +349,25 @@ fun SettingsScreen(
                         text = when {
                             savedMismatchApkName != null -> {
                                 val backupNote = uiState.lastAutoBackupLocation?.let {
-                                    "\n\nРезервная копия данных сохранена в «$it». После переустановки откройте Настройки -> Импорт JSON и выберите этот файл."
+                                    "\n\nРезервная копия всех данных сохранена в «$it». После установки откройте Настройки → Импорт JSON и выберите этот файл."
                                 } ?: ""
-                                "APK «$savedMismatchApkName» сохранён в папку «Загрузки».\n\n1. Нажмите «Удалить текущую» и подтвердите удаление старой версии.\n2. Откройте файл «$savedMismatchApkName» в «Загрузках».\n\nПосле этой разовой переустановки все будущие обновления будут устанавливаться автоматически.$backupNote"
+                                "APK «$savedMismatchApkName» сохранён в папку «Загрузки».\n\n1. Нажмите «Удалить текущую» и подтвердите удаление старой версии.\n2. Откройте «$savedMismatchApkName» в «Загрузках» и установите.\n\nПосле перехода на общий ключ будущие обновления из GitHub будут ставиться поверх без удаления.$backupNote"
                             }
                             compatibility is ApkInstallCompatibility.InvalidArchive ->
                                 "Загруженный APK-файл повреждён или скачался не полностью. Закройте окно и запустите проверку обновлений заново."
-                            compatibility is ApkInstallCompatibility.SignatureMismatch ->
-                                "Установленная версия собрана со старым ключом, поэтому Android блокирует обновление поверх («Приложение не установлено»).\n\nПеред удалением Sonora автоматически сохранит резервную копию всех ваших треков, плейлистов, настроек и очереди в «Downloads/Sonora/sonora_auto_backup.json». После установки нового APK восстановите её в «Настройки -> Импорт JSON»."
+                            compatibility is ApkInstallCompatibility.PackageMismatch ->
+                                "Пакет внутри APK (${compatibility.archivePackage}) не совпадает с Sonora (${compatibility.expectedPackage}). Установка отменена."
+                            compatibility is ApkInstallCompatibility.SignatureMismatch -> {
+                                val keyDetails = if (compatibility.installedCertFingerprint.isNotBlank() &&
+                                    compatibility.archiveCertFingerprint.isNotBlank()
+                                ) {
+                                    "\n\nКлюч установленной: ${compatibility.installedCertFingerprint}\nКлюч нового APK: ${compatibility.archiveCertFingerprint}"
+                                } else {
+                                    ""
+                                }
+                                val backupPath = uiState.lastAutoBackupLocation ?: "Downloads/Sonora/sonora_auto_backup.json"
+                                "Установленная версия и новый APK подписаны разными ключами (например, сборка из AI Studio или старый ключ), поэтому Android блокирует установку поверх.\n\nДанные уже сохранены в «$backupPath». Сохраните APK в «Загрузки», переустановите 1 раз и восстановите данные через «Импорт JSON».$keyDetails"
+                            }
                             compatibility is ApkInstallCompatibility.VersionDowngrade ->
                                 "Код сборки в APK (${compatibility.archiveVersionCode}) ниже установленного (${compatibility.installedVersionCode}). Сохраните файл в «Загрузки» или переустановите приложение вручную."
                             else ->
@@ -368,9 +394,13 @@ fun SettingsScreen(
                             }
                         }
 
-                        compatibility is ApkInstallCompatibility.InvalidArchive -> {
+                        compatibility is ApkInstallCompatibility.InvalidArchive ||
+                            compatibility is ApkInstallCompatibility.PackageMismatch -> {
                             Button(
-                                onClick = closeDialog,
+                                onClick = {
+                                    runCatching { updateState.apkFile.delete() }
+                                    closeDialog()
+                                },
                                 modifier = Modifier.testTag("invalid_apk_close_button")
                             ) {
                                 Text("Понятно")
@@ -417,8 +447,26 @@ fun SettingsScreen(
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = closeDialog) {
-                        Text(if (savedMismatchApkName != null) "Готово" else "Закрыть")
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if (savedMismatchApkName == null &&
+                            (compatibility is ApkInstallCompatibility.SignatureMismatch ||
+                                compatibility is ApkInstallCompatibility.VersionDowngrade)
+                        ) {
+                            TextButton(
+                                onClick = {
+                                    triggerApkInstall(
+                                        file = updateState.apkFile,
+                                        bypassCompatibilityCheck = true
+                                    )
+                                },
+                                modifier = Modifier.testTag("force_install_apk_button")
+                            ) {
+                                Text("Установить всё равно")
+                            }
+                        }
+                        TextButton(onClick = closeDialog) {
+                            Text(if (savedMismatchApkName != null) "Готово" else "Закрыть")
+                        }
                     }
                 }
             )
@@ -488,6 +536,9 @@ fun SettingsScreen(
         // App Updates (GitHub Releases OTA)
         item {
             val isCheckingUpdate = uiState.updateState is AppUpdateUiState.Checking
+            val signatureFingerprint = remember(context) {
+                ApkInstaller.getInstalledSignatureFingerprint(context)
+            }
             SettingsSectionCard(
                 title = "Обновление приложения",
                 icon = SonoraIcons.CloudDownload
@@ -496,6 +547,21 @@ fun SettingsScreen(
                     text = "Текущая версия: v${BuildConfig.VERSION_NAME} (сборка ${BuildConfig.VERSION_CODE})",
                     style = MaterialTheme.typography.bodyLarge
                 )
+                val metaParts = buildList {
+                    if (!BuildConfig.GITHUB_REPOSITORY.startsWith("YOUR_GITHUB_OWNER")) {
+                        add("Репозиторий: ${BuildConfig.GITHUB_REPOSITORY}")
+                    }
+                    if (!signatureFingerprint.isNullOrBlank()) {
+                        add("Ключ: $signatureFingerprint")
+                    }
+                }
+                if (metaParts.isNotEmpty()) {
+                    Text(
+                        text = metaParts.joinToString(" • "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 Text(
                     text = "Медиатека, история, настройки, эквалайзер и очередь сохраняются при обновлении",
                     style = MaterialTheme.typography.bodyMedium,

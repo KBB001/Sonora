@@ -10,6 +10,7 @@ import com.example.data.local.dao.FavoriteDao
 import com.example.data.local.dao.HistoryDao
 import com.example.data.local.dao.PlaylistDao
 import com.example.data.local.dao.SearchHistoryDao
+import com.example.data.local.dao.TrackSignalDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -55,6 +56,28 @@ object DatabaseModule {
         }
     }
 
+    internal val MIGRATION_3_4 = object : Migration(3, 4) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `track_affinities` (" +
+                    "`trackId` TEXT NOT NULL, `normalizedArtist` TEXT NOT NULL, " +
+                    "`moodName` TEXT NOT NULL, `tempoName` TEXT NOT NULL, " +
+                    "`completedCount` INTEGER NOT NULL, `repeatCount` INTEGER NOT NULL, " +
+                    "`quickSkipCount` INTEGER NOT NULL, `partialSkipCount` INTEGER NOT NULL, " +
+                    "`affinityScore` REAL NOT NULL, `lastInteractedAt` INTEGER NOT NULL, " +
+                    "PRIMARY KEY(`trackId`))"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_track_affinities_normalizedArtist` " +
+                    "ON `track_affinities` (`normalizedArtist`)"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_track_affinities_moodName` " +
+                    "ON `track_affinities` (`moodName`)"
+            )
+        }
+    }
+
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): SonoraDatabase =
@@ -63,7 +86,7 @@ object DatabaseModule {
             SonoraDatabase::class.java,
             "sonora_music.db"
         )
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
             .build()
 
     @Provides
@@ -82,4 +105,8 @@ object DatabaseModule {
     @Provides
     fun provideSearchHistoryDao(database: SonoraDatabase): SearchHistoryDao =
         database.searchHistoryDao()
+
+    @Provides
+    fun provideTrackSignalDao(database: SonoraDatabase): TrackSignalDao =
+        database.trackSignalDao()
 }
