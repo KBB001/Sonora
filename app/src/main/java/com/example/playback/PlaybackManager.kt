@@ -39,6 +39,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -1248,14 +1249,14 @@ class PlaybackManager @Inject constructor(
     private fun schedulePersistPlaybackState() {
         if (playbackPersistenceStore == null) return
         persistJob?.cancel()
-        persistJob = scope.launch {
+        persistJob = scope.launch(Dispatchers.IO) {
             delay(250L)
             persistNow()
         }
     }
 
-    private suspend fun persistNow() {
-        val store = playbackPersistenceStore ?: return
+    private suspend fun persistNow() = withContext(Dispatchers.IO) {
+        val store = playbackPersistenceStore ?: return@withContext
         val snapshot = buildPersistedSnapshot()
         store.savePlaybackState(snapshot)
     }

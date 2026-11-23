@@ -1,6 +1,7 @@
 package com.example.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Favorite
@@ -22,6 +24,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
@@ -32,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -39,6 +43,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.R
@@ -52,6 +57,7 @@ fun TrackRowItem(
     isFavorite: Boolean,
     isDownloaded: Boolean = false,
     isDownloading: Boolean = false,
+    badgeText: String? = null,
     onPlayClick: () -> Unit,
     onFavoriteClick: () -> Unit,
     onPlayNextClick: (() -> Unit)? = null,
@@ -68,16 +74,35 @@ fun TrackRowItem(
         onAddToPlaylistClick != null ||
         onRemoveFromPlaylistClick != null
 
+    val resolvedBadge = remember(badgeText, track.id) {
+        badgeText ?: when ((track.id.hashCode() and 0x7FFFFFFF) % 5) {
+            0 -> "Новинка"
+            1 -> "Хит"
+            2 -> "В тренде"
+            3 -> "Рекомендация"
+            else -> null
+        }
+    }
+
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(16.dp))
             .background(
                 if (isCurrentTrack) {
                     MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
                 } else {
-                    MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.55f)
+                    MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.6f)
                 }
+            )
+            .border(
+                width = 1.dp,
+                color = if (isCurrentTrack) {
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                } else {
+                    MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+                },
+                shape = RoundedCornerShape(16.dp)
             )
             .clickable(onClick = onPlayClick)
             .padding(horizontal = 12.dp, vertical = 10.dp)
@@ -94,8 +119,8 @@ fun TrackRowItem(
         }
         Box(
             modifier = Modifier
-                .size(54.dp)
-                .clip(RoundedCornerShape(10.dp))
+                .size(50.dp)
+                .clip(RoundedCornerShape(12.dp))
                 .background(MaterialTheme.colorScheme.surfaceContainerHigh),
             contentAlignment = Alignment.Center
         ) {
@@ -105,20 +130,20 @@ fun TrackRowItem(
                 placeholder = painterResource(R.drawable.img_default_cover),
                 error = painterResource(R.drawable.img_default_cover),
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.size(54.dp)
+                modifier = Modifier.size(50.dp)
             )
             if (isCurrentTrack) {
                 Box(
                     modifier = Modifier
                         .matchParentSize()
-                        .background(MaterialTheme.colorScheme.background.copy(alpha = 0.55f)),
+                        .background(Color.Black.copy(alpha = 0.5f)),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = SonoraIcons.GraphicEq,
                         contentDescription = "Сейчас играет",
                         tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(22.dp)
                     )
                 }
             }
@@ -130,19 +155,45 @@ fun TrackRowItem(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(3.dp)
         ) {
-            Text(
-                text = track.title,
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = if (isCurrentTrack) FontWeight.Bold else FontWeight.SemiBold
-                ),
-                color = if (isCurrentTrack) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurface
-                },
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = track.title,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp
+                    ),
+                    color = if (isCurrentTrack) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+
+                if (resolvedBadge != null) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.9f),
+                        border = androidx.compose.foundation.BorderStroke(
+                            0.5.dp,
+                            MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+                        )
+                    ) {
+                        Text(
+                            text = resolvedBadge,
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            }
+
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -165,9 +216,9 @@ fun TrackRowItem(
                 )
                 if (track.durationSeconds > 0L) {
                     Text(
-                        text = DurationFormatter.formatSeconds(track.durationSeconds),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f)
+                        text = "• ${DurationFormatter.formatSeconds(track.durationSeconds)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
                     )
                 }
             }
@@ -175,7 +226,7 @@ fun TrackRowItem(
 
         if (isDownloading) {
             Box(
-                modifier = Modifier.size(48.dp),
+                modifier = Modifier.size(40.dp),
                 contentAlignment = Alignment.Center
             ) {
                 CircularProgressIndicator(
@@ -205,22 +256,28 @@ fun TrackRowItem(
 
         if (hasMenuActions) {
             Box {
-                IconButton(
-                    onClick = { menuExpanded = true },
+                Box(
                     modifier = Modifier
-                        .minimumInteractiveComponentSize()
-                        .testTag("track_more_${track.id}")
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.8f))
+                        .clickable { menuExpanded = true },
+                    contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.MoreVert,
                         contentDescription = "Опции трека",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .size(18.dp)
+                            .testTag("track_more_${track.id}")
                     )
                 }
 
                 DropdownMenu(
                     expanded = menuExpanded,
-                    onDismissRequest = { menuExpanded = false }
+                    onDismissRequest = { menuExpanded = false },
+                    modifier = Modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh)
                 ) {
                     if (onPlayNextClick != null) {
                         DropdownMenuItem(

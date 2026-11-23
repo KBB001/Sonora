@@ -6,6 +6,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -38,8 +40,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -78,13 +82,18 @@ fun MiniPlayerBar(
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
-                    .clip(RoundedCornerShape(16.dp))
+                    .padding(horizontal = 14.dp, vertical = 6.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .border(
+                        width = 1.dp,
+                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+                        shape = RoundedCornerShape(20.dp)
+                    )
                     .clickable(onClick = onOpenNowPlaying)
                     .testTag("mini_player_bar"),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                tonalElevation = 6.dp,
-                shadowElevation = 8.dp
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 8.dp,
+                shadowElevation = 12.dp
             ) {
                 Column {
                     Row(
@@ -101,8 +110,8 @@ fun MiniPlayerBar(
                             contentScale = ContentScale.Crop,
                             modifier = Modifier
                                 .size(44.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(MaterialTheme.colorScheme.surface)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                         )
 
                         Spacer(modifier = Modifier.width(12.dp))
@@ -113,7 +122,10 @@ fun MiniPlayerBar(
                         ) {
                             Text(
                                 text = track.title,
-                                style = MaterialTheme.typography.titleMedium,
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp
+                                ),
                                 color = MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -124,7 +136,7 @@ fun MiniPlayerBar(
                                 } else {
                                     track.artist
                                 },
-                                style = MaterialTheme.typography.bodyMedium,
+                                style = MaterialTheme.typography.bodySmall,
                                 color = if (playbackState.isLoadingStream) {
                                     MaterialTheme.colorScheme.primary
                                 } else {
@@ -137,21 +149,25 @@ fun MiniPlayerBar(
 
                         if (playbackState.isLoadingStream || playbackState.isBuffering) {
                             Box(
-                                modifier = Modifier.size(48.dp),
+                                modifier = Modifier.size(42.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 CircularProgressIndicator(
-                                    modifier = Modifier.size(22.dp),
+                                    modifier = Modifier.size(20.dp),
                                     strokeWidth = 2.5.dp,
                                     color = MaterialTheme.colorScheme.primary
                                 )
                             }
                         } else {
-                            IconButton(
-                                onClick = onTogglePlayPause,
+                            // Bright Neon Green Play Button matching reference photo
+                            Box(
                                 modifier = Modifier
-                                    .minimumInteractiveComponentSize()
-                                    .testTag("mini_player_play_pause")
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primary)
+                                    .clickable(onClick = onTogglePlayPause)
+                                    .testTag("mini_player_play_pause"),
+                                contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     imageVector = if (playbackState.isPlaying) {
@@ -160,10 +176,13 @@ fun MiniPlayerBar(
                                         Icons.Rounded.PlayArrow
                                     },
                                     contentDescription = if (playbackState.isPlaying) "Пауза" else "Воспроизвести",
-                                    tint = MaterialTheme.colorScheme.onSurface
+                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                    modifier = Modifier.size(22.dp)
                                 )
                             }
                         }
+
+                        Spacer(modifier = Modifier.width(4.dp))
 
                         IconButton(
                             onClick = onSkipNext,
@@ -174,7 +193,8 @@ fun MiniPlayerBar(
                             Icon(
                                 imageVector = SonoraIcons.SkipNext,
                                 contentDescription = "Следующий трек",
-                                tint = MaterialTheme.colorScheme.onSurface
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(22.dp)
                             )
                         }
                     }
@@ -200,6 +220,6 @@ private fun MiniPlayerProgressIndicator(progressFlow: StateFlow<PlaybackProgress
             .fillMaxWidth()
             .height(2.5.dp),
         color = MaterialTheme.colorScheme.primary,
-        trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
+        trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
     )
 }

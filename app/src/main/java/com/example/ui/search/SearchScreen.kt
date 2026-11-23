@@ -1,7 +1,9 @@
 package com.example.ui.search
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,6 +21,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -27,7 +32,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
@@ -38,7 +42,6 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
@@ -54,16 +57,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
@@ -74,7 +80,40 @@ import com.example.domain.model.Track
 import com.example.ui.components.AddToPlaylistDialog
 import com.example.ui.components.SonoraIcons
 import com.example.ui.components.TrackRowItem
-import java.util.Locale
+
+private data class FeaturedSearchCard(
+    val badge: String,
+    val title: String,
+    val description: String,
+    val query: String
+)
+
+private val FEATURED_SEARCH_CARDS = listOf(
+    FeaturedSearchCard(
+        badge = "ХИТ",
+        title = "Lo-Fi радио",
+        description = "Бесконечный поток кассетного уюта",
+        query = "Lo-Fi радио"
+    ),
+    FeaturedSearchCard(
+        badge = "НОВИНКА",
+        title = "Акустический инди",
+        description = "Живые гитары и камерный вокал",
+        query = "Акустический инди"
+    ),
+    FeaturedSearchCard(
+        badge = "VIBE",
+        title = "Джаз пиано",
+        description = "Ночной джаз-клуб в центре города",
+        query = "Джаз пиано"
+    ),
+    FeaturedSearchCard(
+        badge = "LIVE",
+        title = "Ночной эфир",
+        description = "Электронный эмбиент и глубокий бас",
+        query = "Ночной эфир"
+    )
+)
 
 private val QUICK_GENRE_SUGGESTIONS = listOf(
     "Lo-Fi радио",
@@ -135,30 +174,49 @@ fun SearchScreen(
             .imePadding()
             .padding(horizontal = 16.dp)
     ) {
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
-        Text(
-            text = "Поиск",
-            style = MaterialTheme.typography.headlineMedium,
-            color = MaterialTheme.colorScheme.onBackground
-        )
+        // Header matching photo ("< Поиск")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.size(22.dp)
+            )
+            Text(
+                text = "Поиск",
+                style = MaterialTheme.typography.headlineMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 24.sp
+                ),
+                color = MaterialTheme.colorScheme.onBackground
+            )
+        }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
+        // Search Input matching photo ("Треки, артисты или ссылка YouTube")
         OutlinedTextField(
             value = uiState.query,
             onValueChange = viewModel::onQueryChange,
             placeholder = {
                 Text(
-                    text = stringResource(R.string.search_hint),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    text = "Треки, артисты или ссылка YouTube",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 14.sp
                 )
             },
             leadingIcon = {
                 Icon(
                     imageVector = Icons.Rounded.Search,
                     contentDescription = "Иконка поиска",
-                    tint = MaterialTheme.colorScheme.primary
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp)
                 )
             },
             trailingIcon = {
@@ -169,13 +227,14 @@ fun SearchScreen(
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.Close,
-                            contentDescription = "Очистить поиск"
+                            contentDescription = "Очистить поиск",
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
             },
             singleLine = true,
-            shape = RoundedCornerShape(16.dp),
+            shape = CircleShape,
             colors = OutlinedTextFieldDefaults.colors(
                 focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                 unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
@@ -196,19 +255,30 @@ fun SearchScreen(
 
         Spacer(modifier = Modifier.height(10.dp))
 
+        // Search Filter Chips matching photo ("Все", "Треки", "Плейлисты", "Исполнители")
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
             SearchFilter.entries.forEach { filter ->
+                val selected = uiState.selectedFilter == filter
                 FilterChip(
-                    selected = uiState.selectedFilter == filter,
+                    selected = selected,
                     onClick = { viewModel.selectFilter(filter) },
-                    label = { Text(filter.label) },
+                    label = {
+                        Text(
+                            text = filter.label,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                        )
+                    },
                     colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = MaterialTheme.colorScheme.primary,
-                        selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                        selectedContainerColor = Color.White,
+                        selectedLabelColor = Color.Black,
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        labelColor = MaterialTheme.colorScheme.onSurface
                     ),
+                    shape = CircleShape,
+                    border = null,
                     modifier = Modifier.testTag("search_filter_${filter.name}")
                 )
             }
@@ -238,7 +308,7 @@ fun SearchScreen(
 
         if (uiState.suggestions.isNotEmpty() && uiState.resultsState is SearchResultsState.Idle) {
             Surface(
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(16.dp),
                 color = MaterialTheme.colorScheme.surfaceContainer,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -253,7 +323,7 @@ fun SearchScreen(
                                     keyboardController?.hide()
                                     viewModel.submitSearch(suggestion)
                                 }
-                                .padding(start = 14.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                                .padding(start = 14.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
@@ -296,13 +366,106 @@ fun SearchScreen(
                     contentPadding = PaddingValues(
                         bottom = bottomContentPadding.calculateBottomPadding() + 16.dp
                     ),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
+                    // 2x2 Grid of Featured Vibe Cards matching reference photo Screen 3 ("Поиск")
+                    item(key = "featured_vibe_grid") {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            LazyVerticalGrid(
+                                columns = GridCells.Fixed(2),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(370.dp)
+                            ) {
+                                items(FEATURED_SEARCH_CARDS, key = { it.title }) { card ->
+                                    Surface(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(175.dp)
+                                            .clip(RoundedCornerShape(18.dp))
+                                            .border(
+                                                width = 1.dp,
+                                                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
+                                                shape = RoundedCornerShape(18.dp)
+                                            )
+                                            .clickable {
+                                                keyboardController?.hide()
+                                                viewModel.submitSearch(card.query)
+                                            },
+                                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                        shape = RoundedCornerShape(18.dp)
+                                    ) {
+                                        Column {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(105.dp)
+                                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                                            ) {
+                                                Image(
+                                                    painter = painterResource(R.drawable.img_hero_discover),
+                                                    contentDescription = card.title,
+                                                    contentScale = ContentScale.Crop,
+                                                    modifier = Modifier.fillMaxSize()
+                                                )
+
+                                                Surface(
+                                                    shape = RoundedCornerShape(6.dp),
+                                                    color = Color.Black.copy(alpha = 0.75f),
+                                                    modifier = Modifier
+                                                        .padding(8.dp)
+                                                        .align(Alignment.TopStart)
+                                                ) {
+                                                    Text(
+                                                        text = card.badge,
+                                                        style = MaterialTheme.typography.labelSmall.copy(
+                                                            fontSize = 9.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            letterSpacing = 0.5.sp
+                                                        ),
+                                                        color = Color.White,
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    )
+                                                }
+                                            }
+
+                                            Column(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                                verticalArrangement = Arrangement.Center
+                                            ) {
+                                                Text(
+                                                    text = card.title,
+                                                    style = MaterialTheme.typography.titleMedium.copy(
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 14.sp
+                                                    ),
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Text(
+                                                    text = card.description,
+                                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    maxLines = 2,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     if (uiState.localMatches.isNotEmpty()) {
                         item(key = "local_matches_header", contentType = "section_header") {
                             Text(
                                 text = "В вашей медиатеке",
-                                style = MaterialTheme.typography.titleMedium,
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.primary
                             )
                         }
@@ -343,7 +506,7 @@ fun SearchScreen(
                                 ) {
                                     Text(
                                         text = "Недавние запросы",
-                                        style = MaterialTheme.typography.titleMedium
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                                     )
                                     TextButton(onClick = viewModel::clearSearchHistory) {
                                         Text("Очистить")
@@ -353,12 +516,12 @@ fun SearchScreen(
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clip(RoundedCornerShape(10.dp))
+                                            .clip(RoundedCornerShape(12.dp))
                                             .clickable {
                                                 keyboardController?.hide()
                                                 viewModel.submitSearch(pastQuery)
                                             }
-                                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                                            .padding(horizontal = 10.dp, vertical = 8.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Icon(
@@ -395,7 +558,7 @@ fun SearchScreen(
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             Text(
                                 text = "Быстрый выбор жанров",
-                                style = MaterialTheme.typography.titleMedium,
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             FlowRow(
@@ -409,6 +572,7 @@ fun SearchScreen(
                                             viewModel.submitSearch(tag)
                                         },
                                         label = { Text(tag) },
+                                        shape = CircleShape,
                                         colors = AssistChipDefaults.assistChipColors(
                                             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                                             labelColor = MaterialTheme.colorScheme.onSurface
@@ -426,7 +590,7 @@ fun SearchScreen(
                                 verticalArrangement = Arrangement.spacedBy(10.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(vertical = 32.dp, horizontal = 16.dp)
+                                    .padding(vertical = 24.dp, horizontal = 16.dp)
                             ) {
                                 Icon(
                                     imageVector = SonoraIcons.MusicNote,
@@ -518,7 +682,12 @@ fun SearchScreen(
                             Surface(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(14.dp))
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .border(
+                                        width = 1.dp,
+                                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
+                                        shape = RoundedCornerShape(16.dp)
+                                    )
                                     .clickable { viewModel.openPlaylistSummary(playlist) },
                                 color = MaterialTheme.colorScheme.surfaceContainerLow
                             ) {
@@ -534,13 +703,13 @@ fun SearchScreen(
                                         contentScale = ContentScale.Crop,
                                         modifier = Modifier
                                             .size(56.dp)
-                                            .clip(RoundedCornerShape(10.dp))
+                                            .clip(RoundedCornerShape(12.dp))
                                     )
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = playlist.name,
-                                            style = MaterialTheme.typography.titleMedium,
+                                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
@@ -594,7 +763,12 @@ fun SearchScreen(
                             Surface(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(14.dp))
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .border(
+                                        width = 1.dp,
+                                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
+                                        shape = RoundedCornerShape(16.dp)
+                                    )
                                     .clickable { viewModel.openArtistSummary(artist) },
                                 color = MaterialTheme.colorScheme.surfaceContainerLow
                             ) {
@@ -616,7 +790,7 @@ fun SearchScreen(
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = artist.name,
-                                            style = MaterialTheme.typography.titleMedium,
+                                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
@@ -652,110 +826,8 @@ fun SearchScreen(
                         contentPadding = PaddingValues(
                             bottom = bottomContentPadding.calculateBottomPadding() + 16.dp
                         ),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        results.playlistTitle?.let { playlistTitle ->
-                            item(key = "playlist_header", contentType = "playlist_header") {
-                                Surface(
-                                    shape = RoundedCornerShape(16.dp),
-                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(bottom = 8.dp)
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(14.dp),
-                                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                            Text(
-                                                text = playlistTitle,
-                                                style = MaterialTheme.typography.titleMedium,
-                                                maxLines = 2,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                            Text(
-                                                text = "${results.items.size} треков",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                        FlowRow(
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            OutlinedButton(
-                                                onClick = {
-                                                    viewModel.saveLoadedPlaylistToLibrary(
-                                                        playlistTitle,
-                                                        results.items,
-                                                        onShowMessage
-                                                    )
-                                                }
-                                            ) {
-                                                Icon(
-                                                    SonoraIcons.BookmarkAdd,
-                                                    contentDescription = null,
-                                                    modifier = Modifier.size(18.dp)
-                                                )
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Text("Сохранить")
-                                            }
-                                            Button(
-                                                onClick = {
-                                                    viewModel.playAll(results.items, shuffle = false)
-                                                }
-                                            ) {
-                                                Icon(
-                                                    Icons.Rounded.PlayArrow,
-                                                    contentDescription = null,
-                                                    modifier = Modifier.size(18.dp)
-                                                )
-                                                Spacer(modifier = Modifier.width(4.dp))
-                                                Text("Играть")
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        if (results.playlistTitle == null) {
-                            item(key = "tracks_actions_header", contentType = "actions_header") {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(bottom = 4.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = "Найдено: ${results.items.size}",
-                                        style = MaterialTheme.typography.labelLarge,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        TextButton(
-                                            onClick = { viewModel.playAll(results.items, shuffle = false) },
-                                            modifier = Modifier.testTag("search_play_all_button")
-                                        ) {
-                                            Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text("Всё")
-                                        }
-                                        TextButton(
-                                            onClick = { viewModel.playAll(results.items, shuffle = true) },
-                                            modifier = Modifier.testTag("search_shuffle_button")
-                                        ) {
-                                            Icon(SonoraIcons.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text("Перемешать")
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
                         items(
                             items = results.items,
                             key = { it.id },
@@ -790,8 +862,8 @@ fun SearchScreen(
 
 private fun formatCompactCount(count: Long): String {
     return when {
-        count >= 1_000_000L -> String.format(Locale.US, "%.1f млн", count / 1_000_000f)
-        count >= 1_000L -> String.format(Locale.US, "%.0f тыс.", count / 1_000f)
+        count >= 1_000_000L -> String.format(java.util.Locale.US, "%.1fM", count / 1_000_000.0)
+        count >= 1_000L -> String.format(java.util.Locale.US, "%.1fk", count / 1_000.0)
         else -> count.toString()
     }
 }

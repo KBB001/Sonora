@@ -56,8 +56,13 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
+import com.example.ui.account.SignOutConfirmScreen
+import com.example.ui.account.YouTubeAccountScreen
 import com.example.ui.account.YouTubeLoginScreen
 import com.example.ui.components.MiniPlayerBar
+import com.example.ui.settings.AppUpdateScreen
+import com.example.ui.settings.CacheQualityScreen
+import com.example.ui.settings.EqualizerScreen
 import com.example.ui.components.SonoraIcons
 import com.example.ui.home.HomeScreen
 import com.example.ui.library.LibraryScreen
@@ -118,7 +123,12 @@ fun SonoraNavHost(
     val currentDestination = backStackEntry?.destination
     val isNowPlayingScreen = currentDestination?.hasRoute<SonoraRoute.NowPlaying>() == true
     val isFullScreenOverlay = isNowPlayingScreen ||
-        currentDestination?.hasRoute<SonoraRoute.YouTubeLogin>() == true
+        currentDestination?.hasRoute<SonoraRoute.YouTubeLogin>() == true ||
+        currentDestination?.hasRoute<SonoraRoute.AppUpdate>() == true ||
+        currentDestination?.hasRoute<SonoraRoute.Equalizer>() == true ||
+        currentDestination?.hasRoute<SonoraRoute.CacheQuality>() == true ||
+        currentDestination?.hasRoute<SonoraRoute.YouTubeAccount>() == true ||
+        currentDestination?.hasRoute<SonoraRoute.SignOutConfirm>() == true
 
     val playerUiState by playerViewModel.uiState.collectAsStateWithLifecycle()
     val playbackState = playerUiState.playbackState
@@ -187,7 +197,7 @@ fun SonoraNavHost(
                             onSkipNext = playerViewModel::skipNext
                         )
                         NavigationBar(
-                            containerColor = MaterialTheme.colorScheme.surface,
+                            containerColor = MaterialTheme.colorScheme.background,
                             tonalElevation = 0.dp
                         ) {
                             topLevelDestinations.forEach { dest ->
@@ -196,16 +206,34 @@ fun SonoraNavHost(
                                     selected = selected,
                                     onClick = { navigateTopLevel(dest.route) },
                                     icon = {
-                                        Icon(
-                                            imageVector = if (selected) dest.selectedIcon else dest.unselectedIcon,
-                                            contentDescription = dest.label
-                                        )
+                                        if (dest.route == SonoraRoute.Library) {
+                                            androidx.compose.material3.BadgedBox(
+                                                badge = {
+                                                    androidx.compose.material3.Badge(
+                                                        containerColor = MaterialTheme.colorScheme.primary,
+                                                        contentColor = MaterialTheme.colorScheme.onPrimary
+                                                    ) {
+                                                        Text("3", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                                                    }
+                                                }
+                                            ) {
+                                                Icon(
+                                                    imageVector = if (selected) dest.selectedIcon else dest.unselectedIcon,
+                                                    contentDescription = dest.label
+                                                )
+                                            }
+                                        } else {
+                                            Icon(
+                                                imageVector = if (selected) dest.selectedIcon else dest.unselectedIcon,
+                                                contentDescription = dest.label
+                                            )
+                                        }
                                     },
                                     label = { Text(dest.label, maxLines = 1) },
                                     colors = NavigationBarItemDefaults.colors(
                                         selectedIconColor = MaterialTheme.colorScheme.primary,
                                         selectedTextColor = MaterialTheme.colorScheme.primary,
-                                        indicatorColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
+                                        indicatorColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
                                         unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
                                         unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
                                     ),
@@ -348,7 +376,57 @@ fun SonoraNavHost(
                                         navController.navigate(SonoraRoute.YouTubeLogin(resetSession = resetSession))
                                     },
                                     bottomContentPadding = contentPadding,
+                                    onShowMessage = ::showMessage,
+                                    onNavigateToAppUpdate = { navController.navigate(SonoraRoute.AppUpdate) },
+                                    onNavigateToEqualizer = { navController.navigate(SonoraRoute.Equalizer) },
+                                    onNavigateToCacheQuality = { navController.navigate(SonoraRoute.CacheQuality) },
+                                    onNavigateToYouTubeAccount = { navController.navigate(SonoraRoute.YouTubeAccount) },
+                                    onNavigateToSignOutConfirm = { navController.navigate(SonoraRoute.SignOutConfirm) }
+                                )
+                            }
+
+                            composable<SonoraRoute.AppUpdate> {
+                                AppUpdateScreen(
+                                    onBack = { navController.popBackStack() },
+                                    bottomContentPadding = contentPadding,
                                     onShowMessage = ::showMessage
+                                )
+                            }
+
+                            composable<SonoraRoute.Equalizer> {
+                                EqualizerScreen(
+                                    onBack = { navController.popBackStack() },
+                                    bottomContentPadding = contentPadding
+                                )
+                            }
+
+                            composable<SonoraRoute.CacheQuality> {
+                                CacheQualityScreen(
+                                    onBack = { navController.popBackStack() },
+                                    bottomContentPadding = contentPadding,
+                                    onShowMessage = ::showMessage
+                                )
+                            }
+
+                            composable<SonoraRoute.YouTubeAccount> {
+                                YouTubeAccountScreen(
+                                    onBack = { navController.popBackStack() },
+                                    onNavigateToSignOutConfirm = {
+                                        navController.navigate(SonoraRoute.SignOutConfirm)
+                                    },
+                                    bottomContentPadding = contentPadding,
+                                    onShowMessage = ::showMessage
+                                )
+                            }
+
+                            composable<SonoraRoute.SignOutConfirm> {
+                                SignOutConfirmScreen(
+                                    onBack = { navController.popBackStack() },
+                                    onConfirmSignOut = {
+                                        navController.popBackStack(SonoraRoute.Settings, false)
+                                        showMessage("Аккаунт отвязан")
+                                    },
+                                    bottomContentPadding = contentPadding
                                 )
                             }
 

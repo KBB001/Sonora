@@ -40,7 +40,7 @@ private val SonoraDarkColorScheme = darkColorScheme(
 )
 
 private val SonoraLightColorScheme = lightColorScheme(
-    primary = Color(0xFF0E9F45),
+    primary = Color(0xFF00C875),
     onPrimary = Color.White,
     primaryContainer = Color(0xFFC2F5D4),
     onPrimaryContainer = Color(0xFF032911),
@@ -48,25 +48,25 @@ private val SonoraLightColorScheme = lightColorScheme(
     onSecondary = Color.White,
     secondaryContainer = Color(0xFFE0F2FE),
     onSecondaryContainer = Color(0xFF082F49),
-    background = Color(0xFFF6F8FA),
-    onBackground = Color(0xFF0F172A),
-    surface = Color.White,
-    onSurface = Color(0xFF0F172A),
-    surfaceVariant = Color(0xFFE2E8F0),
-    onSurfaceVariant = Color(0xFF475569),
-    surfaceContainerLowest = Color(0xFFF6F8FA),
-    surfaceContainerLow = Color(0xFFFFFFFF),
-    surfaceContainer = Color(0xFFF1F5F9),
-    surfaceContainerHigh = Color(0xFFE2E8F0),
-    surfaceContainerHighest = Color(0xFFCBD5E1),
-    outline = Color(0xFFCBD5E1),
+    background = Color(0xFF090A0E),
+    onBackground = Color(0xFFFFFFFF),
+    surface = Color(0xFF141720),
+    onSurface = Color(0xFFFFFFFF),
+    surfaceVariant = Color(0xFF1E222F),
+    onSurfaceVariant = Color(0xFF8F97A6),
+    surfaceContainerLowest = Color(0xFF090A0E),
+    surfaceContainerLow = Color(0xFF141720),
+    surfaceContainer = Color(0xFF1E222F),
+    surfaceContainerHigh = Color(0xFF282D3E),
+    surfaceContainerHighest = Color(0xFF32384D),
+    outline = Color(0xFF212636),
     error = Color(0xFFDC2626)
 )
 
 private val SonoraShapes = Shapes(
     small = RoundedCornerShape(10.dp),
     medium = RoundedCornerShape(16.dp),
-    large = RoundedCornerShape(24.dp),
+    large = RoundedCornerShape(22.dp),
     extraLarge = RoundedCornerShape(28.dp)
 )
 
@@ -88,7 +88,7 @@ fun SonoraTheme(
             if (isDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
         isDark -> SonoraDarkColorScheme
-        else -> SonoraLightColorScheme
+        else -> SonoraDarkColorScheme // Default to sleek dark design as shown in reference photo
     }
 
     MaterialTheme(

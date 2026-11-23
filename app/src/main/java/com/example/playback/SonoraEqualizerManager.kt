@@ -186,7 +186,7 @@ class SonoraEqualizerManager @Inject constructor(
 
     private fun persistDesiredConfig() {
         val snapshot = desiredConfig
-        scope.launch {
+        scope.launch(Dispatchers.IO) {
             persistenceStore.saveEqualizerState(snapshot)
         }
     }

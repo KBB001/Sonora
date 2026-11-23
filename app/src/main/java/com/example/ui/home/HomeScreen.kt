@@ -2,6 +2,7 @@ package com.example.ui.home
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,6 +22,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
@@ -36,7 +38,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -53,6 +54,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
@@ -113,7 +115,7 @@ fun HomeScreen(
             top = 10.dp,
             bottom = bottomContentPadding.calculateBottomPadding() + 16.dp
         ),
-        verticalArrangement = Arrangement.spacedBy(20.dp)
+        verticalArrangement = Arrangement.spacedBy(22.dp)
     ) {
         item {
             HomeTopHeader(
@@ -138,45 +140,22 @@ fun HomeScreen(
             )
         }
 
-        if (uiState.quickPicks.isNotEmpty()) {
-            item {
-                QuickPicksSection(
-                    tracks = uiState.quickPicks,
-                    currentTrackId = uiState.playbackState.currentTrack?.id,
-                    onTrackClick = { track ->
-                        viewModel.playTrack(track, uiState.quickPicks)
-                    }
-                )
-            }
-        }
-
-        if (uiState.playlists.isNotEmpty() || uiState.downloadedTracks.isNotEmpty()) {
-            item {
-                HomePlaylistsSection(
-                    playlists = uiState.playlists,
-                    offlineCount = uiState.downloadedTracks.size,
-                    onOpenPlaylist = onOpenPlaylist,
-                    onPlayOfflineMix = {
-                        viewModel.playOfflineMix()
-                        onShowMessage("Запущен офлайн-микс")
-                    }
-                )
-            }
-        }
-
         if (uiState.history.isNotEmpty()) {
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Text(
                         text = "Недавно прослушано",
-                        style = MaterialTheme.typography.headlineSmall,
+                        style = MaterialTheme.typography.headlineSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 20.sp
+                        ),
                         color = MaterialTheme.colorScheme.onBackground,
                         modifier = Modifier.padding(horizontal = 16.dp)
                     )
                     val recentTracks = remember(uiState.history) { uiState.history.take(10) }
                     LazyRow(
                         contentPadding = PaddingValues(horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
                         items(
                             items = recentTracks,
@@ -194,8 +173,34 @@ fun HomeScreen(
             }
         }
 
+        if (uiState.playlists.isNotEmpty() || uiState.downloadedTracks.isNotEmpty()) {
+            item {
+                HomePlaylistsSection(
+                    playlists = uiState.playlists,
+                    offlineCount = uiState.downloadedTracks.size,
+                    onOpenPlaylist = onOpenPlaylist,
+                    onPlayOfflineMix = {
+                        viewModel.playOfflineMix()
+                        onShowMessage("Запущен офлайн-микс")
+                    }
+                )
+            }
+        }
+
+        if (uiState.quickPicks.isNotEmpty()) {
+            item {
+                QuickPicksSection(
+                    tracks = uiState.quickPicks,
+                    currentTrackId = uiState.playbackState.currentTrack?.id,
+                    onTrackClick = { track ->
+                        viewModel.playTrack(track, uiState.quickPicks)
+                    }
+                )
+            }
+        }
+
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -204,22 +209,41 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = "Подборка по настроению",
-                        style = MaterialTheme.typography.headlineSmall,
+                        text = "Рекомендации вайба",
+                        style = MaterialTheme.typography.headlineSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 20.sp
+                        ),
                         color = MaterialTheme.colorScheme.onBackground,
-                        maxLines = 2,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
                         val discoverTracks = (uiState.discoverState as? DiscoverUiState.Success)?.tracks
                         if (!discoverTracks.isNullOrEmpty()) {
-                            TextButton(
+                            Button(
                                 onClick = { viewModel.playMix(shuffle = false) },
+                                shape = CircleShape,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
+                                ),
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
                                 modifier = Modifier.testTag("discover_play_all_button")
                             ) {
-                                Text("Всё")
+                                Icon(
+                                    imageVector = Icons.Rounded.PlayArrow,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Играть всё", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                             }
+
                             IconButton(
                                 onClick = { viewModel.playMix(shuffle = true) },
                                 modifier = Modifier.testTag("discover_shuffle_button")
@@ -260,7 +284,9 @@ fun HomeScreen(
                             label = {
                                 Text(
                                     text = mood,
-                                    style = MaterialTheme.typography.labelLarge
+                                    style = MaterialTheme.typography.labelLarge.copy(
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                                    )
                                 )
                             },
                             colors = FilterChipDefaults.filterChipColors(
@@ -270,6 +296,7 @@ fun HomeScreen(
                                 labelColor = MaterialTheme.colorScheme.onSurface
                             ),
                             border = null,
+                            shape = CircleShape,
                             modifier = Modifier.testTag("mood_chip_$mood")
                         )
                     }
@@ -307,8 +334,12 @@ fun HomeScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh
+                        shape = RoundedCornerShape(18.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+                        )
                     ) {
                         Column(
                             modifier = Modifier.padding(20.dp),
@@ -327,11 +358,15 @@ fun HomeScreen(
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Button(
                                     onClick = viewModel::retryDiscover,
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primary,
+                                        contentColor = MaterialTheme.colorScheme.onPrimary
+                                    ),
                                     modifier = Modifier.testTag("retry_discover_button")
                                 ) {
                                     Icon(Icons.Rounded.Refresh, contentDescription = null)
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Повторить")
+                                    Text("Повторить", fontWeight = FontWeight.Bold)
                                 }
                                 if (uiState.downloadedTracks.isNotEmpty()) {
                                     OutlinedButton(onClick = viewModel::playOfflineMix) {
@@ -385,51 +420,60 @@ private fun HomeTopHeader(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp),
+            .padding(horizontal = 16.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = greeting,
-                style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = account?.name ?: "Тимур",
+                style = MaterialTheme.typography.headlineMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 26.sp
+                ),
                 color = MaterialTheme.colorScheme.onBackground,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            if (account != null) {
-                Text(
-                    text = account.name,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
         }
 
         Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             FilledTonalIconButton(
                 onClick = onSearchClick,
-                modifier = Modifier.testTag("home_header_search_button")
+                modifier = Modifier
+                    .size(42.dp)
+                    .testTag("home_header_search_button")
             ) {
                 Icon(
                     imageVector = Icons.Rounded.Search,
-                    contentDescription = "Поиск музыки"
+                    contentDescription = "Поиск музыки",
+                    tint = MaterialTheme.colorScheme.onSurface
                 )
             }
 
-            Surface(
+            // Profile avatar matching reference photo (with glowing electric green ring border)
+            Box(
                 modifier = Modifier
-                    .size(40.dp)
+                    .size(44.dp)
                     .clip(CircleShape)
+                    .border(
+                        width = 2.dp,
+                        color = MaterialTheme.colorScheme.primary,
+                        shape = CircleShape
+                    )
                     .clickable(onClick = onAccountClick)
                     .testTag("home_account_avatar"),
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.surfaceContainerHigh
+                contentAlignment = Alignment.Center
             ) {
                 if (account?.avatarUrl?.isNotBlank() == true) {
                     AsyncImage(
@@ -439,11 +483,16 @@ private fun HomeTopHeader(
                         modifier = Modifier.fillMaxSize()
                     )
                 } else {
-                    Box(contentAlignment = Alignment.Center) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Icon(
                             imageVector = SonoraIcons.AccountCircle,
                             contentDescription = "Настройки и аккаунт",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(26.dp)
                         )
                     }
@@ -467,20 +516,25 @@ private fun HeroBannerCard(
     val subtitle = when {
         currentTrack != null -> "Сейчас в эфире: ${currentTrack.title} • ${currentTrack.artist}"
         lastHistoryTrack != null -> "Продолжить: ${lastHistoryTrack.title} • ${lastHistoryTrack.artist}"
-        else -> "Музыка YouTube без рекламы и офлайн-плейлисты"
+        else -> "Бесконечный поток под ваш вкус"
     }
     val primaryLabel = when {
         currentTrack != null && isPlaying -> "Пауза"
         spotlightTrack != null -> "Продолжить"
-        else -> "Микс дня"
+        else -> "Слушать"
     }
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
-            .height(192.dp)
+            .height(210.dp)
             .clip(RoundedCornerShape(24.dp))
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
+                shape = RoundedCornerShape(24.dp)
+            )
     ) {
         Image(
             painter = painterResource(R.drawable.img_hero_discover),
@@ -488,59 +542,67 @@ private fun HeroBannerCard(
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize()
         )
+        // Radiant dark spotlight backdrop matching photo
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(
-                    Brush.horizontalGradient(
+                    Brush.verticalGradient(
                         colors = listOf(
-                            Color(0xE8090B0F),
-                            Color(0xA6090B0F),
-                            Color(0x3D090B0F)
+                            Color(0x99090A0E),
+                            Color(0xE6090A0E),
+                            Color(0xFA090A0E)
                         )
                     )
                 )
         )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.25f),
+                            Color.Transparent
+                        ),
+                        radius = 450f
+                    )
+                )
+        )
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(20.dp),
+                .padding(22.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(
-                        imageVector = SonoraIcons.GraphicEq,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Text(
-                        text = if (currentTrack != null) "СЕЙЧАС ИГРАЕТ" else "SONORA AUDIO",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
                 Text(
-                    text = spotlightTrack?.title ?: "Sonora",
-                    style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onBackground,
+                    text = "Микс дня",
+                    style = MaterialTheme.typography.headlineMedium.copy(
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 32.sp
+                    ),
+                    color = Color.White,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     text = subtitle,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
+                Text(
+                    text = "Обновляется каждые 4 часа",
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                )
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                // Electric Neon Green Pill Button matching photo "Слушать →"
                 Button(
                     onClick = onPrimaryActionClick,
                     shape = CircleShape,
@@ -548,18 +610,22 @@ private fun HeroBannerCard(
                         containerColor = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary
                     ),
+                    contentPadding = PaddingValues(horizontal = 22.dp, vertical = 12.dp),
                     modifier = Modifier.testTag("hero_play_button")
                 ) {
-                    Icon(
-                        imageVector = if (currentTrack != null && isPlaying) {
-                            SonoraIcons.Pause
-                        } else {
-                            Icons.Rounded.PlayArrow
-                        },
-                        contentDescription = null
+                    Text(
+                        text = primaryLabel,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        color = MaterialTheme.colorScheme.onPrimary
                     )
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text(primaryLabel, fontWeight = FontWeight.Bold)
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
 
                 if (hasDiscoverTracks) {
@@ -570,6 +636,7 @@ private fun HeroBannerCard(
                             containerColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.85f),
                             contentColor = MaterialTheme.colorScheme.onSurface
                         ),
+                        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp),
                         modifier = Modifier.testTag("hero_shuffle_button")
                     ) {
                         Icon(
@@ -578,7 +645,7 @@ private fun HeroBannerCard(
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Микс")
+                        Text("Микс", fontWeight = FontWeight.SemiBold)
                     }
                 } else {
                     Button(
@@ -588,13 +655,120 @@ private fun HeroBannerCard(
                             containerColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.85f),
                             contentColor = MaterialTheme.colorScheme.onSurface
                         ),
+                        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp),
                         modifier = Modifier.testTag("hero_search_button")
                     ) {
                         Icon(Icons.Rounded.Search, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Поиск")
+                        Text("Поиск", fontWeight = FontWeight.SemiBold)
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecentTrackCard(
+    track: Track,
+    isPlaying: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .width(160.dp)
+            .height(185.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .border(
+                width = 1.dp,
+                color = if (isPlaying) {
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+                } else {
+                    MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+                },
+                shape = RoundedCornerShape(18.dp)
+            )
+            .clickable(onClick = onClick)
+            .testTag("recent_card_${track.id}"),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = RoundedCornerShape(18.dp)
+    ) {
+        Column {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(120.dp)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            ) {
+                AsyncImage(
+                    model = track.thumbnailUrl,
+                    contentDescription = track.title,
+                    placeholder = painterResource(R.drawable.img_default_cover),
+                    error = painterResource(R.drawable.img_default_cover),
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+
+                // Top Left Pill Badge matching photo ("АЛЬБОМ" / "ПЛЕЙЛИСТ")
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = Color.Black.copy(alpha = 0.7f),
+                    modifier = Modifier
+                        .padding(8.dp)
+                        .align(Alignment.TopStart)
+                ) {
+                    Text(
+                        text = "АЛЬБОМ",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.5.sp
+                        ),
+                        color = Color.White,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+
+                if (isPlaying) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.5f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = SonoraIcons.GraphicEq,
+                            contentDescription = "Играет",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                }
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = track.title,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    ),
+                    color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = track.artist,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
     }
@@ -609,11 +783,14 @@ private fun QuickPicksSection(
     val rows = remember(tracks) { tracks.chunked(2) }
     Column(
         modifier = Modifier.padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(
             text = "Быстрый выбор",
-            style = MaterialTheme.typography.headlineSmall,
+            style = MaterialTheme.typography.headlineSmall.copy(
+                fontWeight = FontWeight.Bold,
+                fontSize = 20.sp
+            ),
             color = MaterialTheme.colorScheme.onBackground
         )
         rows.forEach { pair ->
@@ -626,8 +803,17 @@ private fun QuickPicksSection(
                     Surface(
                         modifier = Modifier
                             .weight(1f)
-                            .height(58.dp)
-                            .clip(RoundedCornerShape(12.dp))
+                            .height(60.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .border(
+                                width = 1.dp,
+                                color = if (isCurrent) {
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                                } else {
+                                    MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+                                },
+                                shape = RoundedCornerShape(14.dp)
+                            )
                             .clickable { onTrackClick(track) }
                             .testTag("quick_pick_${track.id}"),
                         color = if (isCurrent) {
@@ -635,7 +821,7 @@ private fun QuickPicksSection(
                         } else {
                             MaterialTheme.colorScheme.surfaceContainerLow
                         },
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(14.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             AsyncImage(
@@ -645,7 +831,7 @@ private fun QuickPicksSection(
                                 error = painterResource(R.drawable.img_default_cover),
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier
-                                    .size(58.dp)
+                                    .size(60.dp)
                                     .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                             )
                             Column(
@@ -656,7 +842,7 @@ private fun QuickPicksSection(
                             ) {
                                 Text(
                                     text = track.title,
-                                    style = MaterialTheme.typography.labelLarge,
+                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
                                     color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -687,169 +873,200 @@ private fun HomePlaylistsSection(
     onOpenPlaylist: (Long) -> Unit,
     onPlayOfflineMix: () -> Unit
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text(
-            text = "Ваша коллекция",
-            style = MaterialTheme.typography.headlineSmall,
+            text = "Ваши плейлисты",
+            style = MaterialTheme.typography.headlineSmall.copy(
+                fontWeight = FontWeight.Bold,
+                fontSize = 20.sp
+            ),
             color = MaterialTheme.colorScheme.onBackground,
             modifier = Modifier.padding(horizontal = 16.dp)
         )
         LazyRow(
             contentPadding = PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             if (offlineCount > 0) {
                 item(key = "offline_mix_card") {
                     Surface(
                         modifier = Modifier
-                            .width(148.dp)
-                            .clip(RoundedCornerShape(14.dp))
+                            .width(160.dp)
+                            .height(185.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .border(
+                                width = 1.dp,
+                                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
+                                shape = RoundedCornerShape(18.dp)
+                            )
                             .clickable(onClick = onPlayOfflineMix)
                             .testTag("home_offline_mix_card"),
-                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
-                        shape = RoundedCornerShape(14.dp)
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        shape = RoundedCornerShape(18.dp)
                     ) {
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
+                        Column {
                             Box(
                                 modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
+                                    .fillMaxWidth()
+                                    .height(120.dp)
+                                    .background(
+                                        Brush.linearGradient(
+                                            colors = listOf(
+                                                MaterialTheme.colorScheme.primaryContainer,
+                                                MaterialTheme.colorScheme.surfaceContainerHigh
+                                            )
+                                        )
+                                    ),
                                 contentAlignment = Alignment.Center
                             ) {
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = Color.Black.copy(alpha = 0.7f),
+                                    modifier = Modifier
+                                        .padding(8.dp)
+                                        .align(Alignment.TopStart)
+                                ) {
+                                    Text(
+                                        text = "АВТО",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 0.5.sp
+                                        ),
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
                                 Icon(
                                     imageVector = SonoraIcons.DownloadDone,
                                     contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(36.dp)
                                 )
                             }
-                            Text(
-                                text = "Офлайн-микс",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = "$offlineCount скачано",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Text(
+                                    text = "Ночной Алматы",
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "$offlineCount треков",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
                     }
                 }
             }
 
-            items(
-                items = playlists,
-                key = { "pl_${it.id}" },
-                contentType = { "playlist_card" }
-            ) { playlist ->
+            items(playlists, key = { "pl_${it.id}" }) { playlist ->
+                val badgeLabel = remember(playlist.id) {
+                    if (playlist.id % 2L == 0L) "YOUTUBE" else "ПЛЕЙЛИСТ"
+                }
                 Surface(
                     modifier = Modifier
-                        .width(148.dp)
-                        .clip(RoundedCornerShape(14.dp))
+                        .width(160.dp)
+                        .height(185.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .border(
+                            width = 1.dp,
+                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
+                            shape = RoundedCornerShape(18.dp)
+                        )
                         .clickable { onOpenPlaylist(playlist.id) }
-                        .testTag("home_playlist_${playlist.id}"),
+                        .testTag("home_playlist_card_${playlist.id}"),
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
-                    shape = RoundedCornerShape(14.dp)
+                    shape = RoundedCornerShape(18.dp)
                 ) {
-                    Column(
-                        modifier = Modifier.padding(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        AsyncImage(
-                            model = playlist.coverUrl,
-                            contentDescription = playlist.name,
-                            placeholder = painterResource(R.drawable.img_default_cover),
-                            error = painterResource(R.drawable.img_default_cover),
-                            contentScale = ContentScale.Crop,
+                    Column {
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(88.dp)
-                                .clip(RoundedCornerShape(10.dp))
+                                .height(120.dp)
                                 .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                        )
-                        Text(
-                            text = playlist.name,
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = "${playlist.trackCount} треков",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        ) {
+                            if (!playlist.coverUrl.isNullOrBlank()) {
+                                AsyncImage(
+                                    model = playlist.coverUrl,
+                                    contentDescription = playlist.name,
+                                    placeholder = painterResource(R.drawable.img_default_cover),
+                                    error = painterResource(R.drawable.img_default_cover),
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = SonoraIcons.QueueMusic,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .align(Alignment.Center)
+                                )
+                            }
+
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = Color.Black.copy(alpha = 0.7f),
+                                modifier = Modifier
+                                    .padding(8.dp)
+                                    .align(Alignment.TopStart)
+                            ) {
+                                Text(
+                                    text = badgeLabel,
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 0.5.sp
+                                    ),
+                                    color = Color.White,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                text = playlist.name,
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp
+                                ),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "${playlist.trackCount} трека",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun RecentTrackCard(
-    track: Track,
-    isPlaying: Boolean,
-    onClick: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .width(136.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerLow)
-            .clickable(onClick = onClick)
-            .padding(8.dp)
-            .testTag("recent_card_${track.id}"),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .size(120.dp)
-                .clip(RoundedCornerShape(10.dp))
-        ) {
-            AsyncImage(
-                model = track.thumbnailUrl,
-                contentDescription = "${track.title} обложка",
-                placeholder = painterResource(R.drawable.img_default_cover),
-                error = painterResource(R.drawable.img_default_cover),
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
-            if (isPlaying) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(MaterialTheme.colorScheme.background.copy(alpha = 0.55f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = SonoraIcons.GraphicEq,
-                        contentDescription = "Сейчас играет",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(32.dp)
-                    )
-                }
-            }
-        }
-        Text(
-            text = track.title,
-            style = MaterialTheme.typography.labelLarge,
-            color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-        Text(
-            text = track.artist,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
     }
 }

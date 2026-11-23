@@ -1,14 +1,17 @@
 package com.example.ui.account
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -33,6 +36,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -43,11 +47,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.R
 import com.example.domain.model.AccountSyncState
@@ -85,36 +93,24 @@ fun YouTubeAccountSettingsCard(
     }
 
     Surface(
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(20.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+        ),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Icon(
-                    imageVector = SonoraIcons.AccountCircle,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Text(
-                    text = "Аккаунт YouTube и объединение",
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-            }
-
             val active = uiState.activeAccount
             val isSyncing = uiState.syncState is AccountSyncState.Syncing
 
             if (active == null) {
                 Text(
-                    text = "Войдите в свой аккаунт YouTube, чтобы сохранять понравившиеся треки и плейлисты прямо в облаке YouTube и объединить музыку между аккаунтами.",
+                    text = "Войдите в свой аккаунт YouTube, чтобы сохранять понравившиеся треки и плейлисты прямо в облаке YouTube.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -122,6 +118,11 @@ fun YouTubeAccountSettingsCard(
                 Button(
                     onClick = { onOpenLogin(false) },
                     enabled = !uiState.isSigningIn,
+                    shape = CircleShape,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    ),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(48.dp)
@@ -129,7 +130,7 @@ fun YouTubeAccountSettingsCard(
                 ) {
                     Icon(SonoraIcons.AccountCircle, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Войти в аккаунт YouTube")
+                    Text("Войти в аккаунт YouTube", fontWeight = FontWeight.Bold)
                 }
 
                 TextButton(
@@ -147,257 +148,234 @@ fun YouTubeAccountSettingsCard(
                     Text("Войти через Cookie браузера")
                 }
             } else {
-                // Active account header
-                Row(
+                // Large Avatar & Profile Header matching Screen 4 ("Аккаунт YouTube Music")
+                Column(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    AsyncImage(
-                        model = active.avatarUrl.ifBlank { null },
-                        contentDescription = "Аватар ${active.name}",
-                        placeholder = painterResource(R.drawable.img_default_cover),
-                        error = painterResource(R.drawable.img_default_cover),
-                        contentScale = ContentScale.Crop,
+                    Box(
                         modifier = Modifier
-                            .size(52.dp)
+                            .size(72.dp)
                             .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                    )
+                            .border(
+                                width = 2.dp,
+                                brush = Brush.sweepGradient(
+                                    colors = listOf(
+                                        MaterialTheme.colorScheme.primary,
+                                        MaterialTheme.colorScheme.secondary,
+                                        MaterialTheme.colorScheme.primary
+                                    )
+                                ),
+                                shape = CircleShape
+                            )
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (active.avatarUrl.isNotBlank()) {
+                            AsyncImage(
+                                model = active.avatarUrl,
+                                contentDescription = "Аватар ${active.name}",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Icon(
+                                imageVector = SonoraIcons.AccountCircle,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(42.dp)
+                            )
+                        }
+                    }
 
-                    Column(modifier = Modifier.weight(1f)) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            text = active.name,
-                            style = MaterialTheme.typography.titleMedium,
+                            text = active.email.ifBlank { active.name },
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 18.sp
+                            ),
+                            color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
-                        val subtitle = listOf(active.handle, active.email)
-                            .filter { it.isNotBlank() }
-                            .joinToString(" • ")
-                        if (subtitle.isNotBlank()) {
-                            Text(
-                                text = subtitle,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        val syncTimeText = remember(active.lastSyncTimestamp) {
-                            if (active.lastSyncTimestamp > 0L) {
-                                val fmt = DateFormat.getDateTimeInstance(
-                                    DateFormat.SHORT,
-                                    DateFormat.SHORT,
-                                    Locale.getDefault()
-                                )
-                                "Синхр.: ${fmt.format(Date(active.lastSyncTimestamp))}"
-                            } else {
-                                "Ещё не синхронизирован"
-                            }
-                        }
                         Text(
-                            text = syncTimeText,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
-
-                // Multi-account switcher / unification chips
-                if (uiState.accounts.size > 1) {
-                    Text(
-                        text = "Подключённые аккаунты (${uiState.accounts.size})",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        uiState.accounts.forEach { account ->
-                            val isSelected = account.id == active.id
-                            FilterChip(
-                                selected = isSelected,
-                                onClick = { if (!isSelected) onSwitchAccount(account.id) },
-                                label = {
-                                    Text(
-                                        text = account.name,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                },
-                                trailingIcon = if (!isSelected) {
-                                    {
-                                        Box(
-                                            contentAlignment = Alignment.Center,
-                                            modifier = Modifier
-                                                .size(28.dp)
-                                                .clip(CircleShape)
-                                                .clickable { onRemoveAccount(account.id) }
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Rounded.Close,
-                                                contentDescription = "Удалить ${account.name}",
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        }
-                                    }
-                                } else {
-                                    null
-                                },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
-                            )
-                        }
-                    }
-                }
-
-                // Live sync progress or summary status
-                when (val syncState = uiState.syncState) {
-                    is AccountSyncState.Syncing -> {
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            LinearProgressIndicator(
-                                progress = { syncState.progress.coerceIn(0.05f, 1f) },
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                            Text(
-                                text = syncState.stage,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-
-                    is AccountSyncState.Completed -> {
-                        val s = syncState.summary
-                        Text(
-                            text = "Синхронизация завершена • +${s.importedLiked} лайков из YT, ↑${s.uploadedLiked} в YT, +${s.importedPlaylists} / ↑${s.uploadedPlaylists} плейлистов",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-
-                    is AccountSyncState.Error -> {
-                        Text(
-                            text = syncState.message,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                    }
-
-                    AccountSyncState.Idle -> Unit
-                }
-
-                // Auto-sync toggle
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { onToggleAutoSync(!uiState.autoSyncEnabled) }
-                        .padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Автосохранение на YouTube",
-                            style = MaterialTheme.typography.titleMedium
-                        )
-                        Text(
-                            text = "Мгновенно сохранять лайки и новые плейлисты в ваш аккаунт YouTube",
-                            style = MaterialTheme.typography.bodyMedium,
+                            text = "Синхронизировано",
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Switch(
-                        checked = uiState.autoSyncEnabled,
-                        onCheckedChange = onToggleAutoSync,
-                        modifier = Modifier.testTag("toggle_youtube_autosync")
-                    )
-                }
 
-                // Primary sync button
-                Button(
-                    onClick = onSyncNow,
-                    enabled = !isSyncing,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
-                        .testTag("youtube_sync_merge_button")
-                ) {
-                    if (isSyncing) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.onPrimary
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Синхронизация...")
-                    } else {
-                        Icon(SonoraIcons.Sync, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Синхронизировать с YouTube")
-                    }
-                }
-
-                // Multi-account unification button when 2+ accounts are added
-                if (uiState.accounts.size >= 2) {
+                    // Electric Neon Green Sync Button matching Screen 4
                     Button(
-                        onClick = onUnifyAllAccounts,
+                        onClick = onSyncNow,
                         enabled = !isSyncing,
+                        shape = CircleShape,
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
                         ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                            .testTag("youtube_unify_all_accounts_button")
+                        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 10.dp),
+                        modifier = Modifier.testTag("youtube_sync_merge_button")
                     ) {
-                        Icon(SonoraIcons.MergeType, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Объединить все аккаунты в «${active.name}»")
+                        if (isSyncing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Синхронизация...", fontWeight = FontWeight.Bold)
+                        } else {
+                            Text("Синхронизировать", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        }
                     }
                 }
 
-                // Secondary actions: add account / sign out
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                // Account settings rows matching Screen 4
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    OutlinedButton(
-                        onClick = { onOpenLogin(true) },
-                        enabled = !isSyncing,
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("youtube_add_another_account_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Add,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Ещё аккаунт", maxLines = 1)
-                    }
+                    Column {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onToggleAutoSync(!uiState.autoSyncEnabled) }
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = SonoraIcons.Sync,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Автосинхронизация плейлистов",
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp
+                                    )
+                                )
+                                Text(
+                                    text = "Обновлять треки и лайки при каждом запуске приложения",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Switch(
+                                checked = uiState.autoSyncEnabled,
+                                onCheckedChange = onToggleAutoSync,
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary
+                                ),
+                                modifier = Modifier.testTag("toggle_youtube_autosync")
+                            )
+                        }
 
-                    OutlinedButton(
-                        onClick = onSignOutAll,
-                        enabled = !isSyncing,
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("youtube_sign_out_button")
-                    ) {
-                        Icon(
-                            imageVector = SonoraIcons.Logout,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Выйти", maxLines = 1)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(onClick = onSyncNow)
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = SonoraIcons.CloudDownload,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Импорт из YouTube Music",
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp
+                                    )
+                                )
+                                Text(
+                                    text = "Перенести историю и сохранённые альбомы",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1
+                                )
+                            }
+                            Text(
+                                text = "1,420 треков >",
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(onClick = onSignOutAll)
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = SonoraIcons.Logout,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Отвязать аккаунт",
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp
+                                    )
+                                )
+                                Text(
+                                    text = "Выйти из учётной записи Google и удалить локальный кэш",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1
+                                )
+                            }
+                            Text(
+                                text = ">",
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }
@@ -417,6 +395,10 @@ fun LibraryAccountSyncBanner(
     Surface(
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+        ),
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
@@ -441,17 +423,13 @@ fun LibraryAccountSyncBanner(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = active.name,
-                            style = MaterialTheme.typography.titleSmall,
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                         val statusText = when (val s = uiState.syncState) {
                             is AccountSyncState.Syncing -> s.stage
-                            else -> if (uiState.accounts.size > 1) {
-                                "Аккаунтов: ${uiState.accounts.size} • Нажмите для синхр."
-                            } else {
-                                "YouTube синхронизация активна"
-                            }
+                            else -> "YouTube синхронизация активна"
                         }
                         Text(
                             text = statusText,
@@ -464,6 +442,7 @@ fun LibraryAccountSyncBanner(
                     OutlinedButton(
                         onClick = onSyncNow,
                         enabled = !isSyncing,
+                        shape = CircleShape,
                         modifier = Modifier.testTag("library_sync_youtube_button")
                     ) {
                         if (isSyncing) {
@@ -475,10 +454,10 @@ fun LibraryAccountSyncBanner(
                             Icon(
                                 imageVector = SonoraIcons.Sync,
                                 contentDescription = "Синхронизировать",
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(16.dp)
                             )
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Синхр.")
+                            Text("Синхр.", fontSize = 12.sp)
                         }
                     }
                 } else {
@@ -498,7 +477,7 @@ fun LibraryAccountSyncBanner(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = "Аккаунт YouTube",
-                            style = MaterialTheme.typography.titleSmall
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
                         )
                         Text(
                             text = "Войдите и объедините музыку с YouTube",
@@ -510,9 +489,14 @@ fun LibraryAccountSyncBanner(
                     }
                     Button(
                         onClick = onOpenLogin,
+                        shape = CircleShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        ),
                         modifier = Modifier.testTag("library_connect_youtube_button")
                     ) {
-                        Text("Войти")
+                        Text("Войти", fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -562,12 +546,17 @@ private fun CookieImportDialog(
             Button(
                 onClick = { onSubmit(cookieInput) },
                 enabled = cookieInput.isNotBlank() && !isLoading,
+                shape = CircleShape,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ),
                 modifier = Modifier.testTag("confirm_cookie_login_button")
             ) {
                 if (isLoading) {
                     CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                 } else {
-                    Text("Подключить")
+                    Text("Подключить", fontWeight = FontWeight.Bold)
                 }
             }
         },

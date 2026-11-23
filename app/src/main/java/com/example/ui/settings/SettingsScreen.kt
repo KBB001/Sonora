@@ -1,12 +1,14 @@
 package com.example.ui.settings
 
-import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -21,12 +23,15 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -40,6 +45,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -52,10 +58,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.BuildConfig
@@ -81,6 +90,11 @@ fun SettingsScreen(
     onOpenYouTubeLogin: (resetSession: Boolean) -> Unit,
     bottomContentPadding: PaddingValues,
     onShowMessage: (String) -> Unit,
+    onNavigateToAppUpdate: (() -> Unit)? = null,
+    onNavigateToEqualizer: (() -> Unit)? = null,
+    onNavigateToCacheQuality: (() -> Unit)? = null,
+    onNavigateToYouTubeAccount: (() -> Unit)? = null,
+    onNavigateToSignOutConfirm: (() -> Unit)? = null,
     viewModel: SettingsViewModel = hiltViewModel(),
     accountViewModel: YouTubeAccountViewModel = hiltViewModel()
 ) {
@@ -260,9 +274,13 @@ fun SettingsScreen(
                                 onError = onShowMessage
                             )
                         },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        ),
                         modifier = Modifier.testTag("confirm_download_update_button")
                     ) {
-                        Text("Скачать и установить")
+                        Text("Скачать и установить", fontWeight = FontWeight.Bold)
                     }
                 },
                 dismissButton = {
@@ -496,21 +514,37 @@ fun SettingsScreen(
         contentPadding = PaddingValues(
             start = 16.dp,
             end = 16.dp,
-            top = 12.dp,
+            top = 10.dp,
             bottom = bottomContentPadding.calculateBottomPadding() + 16.dp
         ),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
-            Text(
-                text = "Настройки",
-                style = MaterialTheme.typography.headlineMedium,
-                color = MaterialTheme.colorScheme.onBackground
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onBackground,
+                    modifier = Modifier.size(22.dp)
+                )
+                Text(
+                    text = "Настройки",
+                    style = MaterialTheme.typography.headlineMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 24.sp
+                    ),
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+            }
         }
 
-        // YouTube Account & Unification
+        // Section: АККАУНТ
         item {
+            CategoryHeader(title = "АККАУНТ")
             YouTubeAccountSettingsCard(
                 uiState = accountUiState,
                 onOpenLogin = onOpenYouTubeLogin,
@@ -533,385 +567,276 @@ fun SettingsScreen(
             )
         }
 
-        // App Updates (GitHub Releases OTA)
+        // Section: СИНХРОНИЗАЦИЯ
         item {
-            val isCheckingUpdate = uiState.updateState is AppUpdateUiState.Checking
-            val signatureFingerprint = remember(context) {
-                ApkInstaller.getInstalledSignatureFingerprint(context)
-            }
-            SettingsSectionCard(
-                title = "Обновление приложения",
-                icon = SonoraIcons.CloudDownload
-            ) {
-                Text(
-                    text = "Текущая версия: v${BuildConfig.VERSION_NAME} (сборка ${BuildConfig.VERSION_CODE})",
-                    style = MaterialTheme.typography.bodyLarge
+            CategoryHeader(title = "СИНХРОНИЗАЦИЯ")
+            GroupedSettingsCard {
+                SettingsRowItem(
+                    icon = SonoraIcons.HighQuality,
+                    title = "Качество кэша",
+                    subtitle = "Максимальное качество для офлайн-режима",
+                    value = when (uiState.settings.audioQuality) {
+                        AudioQuality.DATA_SAVER -> "64 кб/с >"
+                        AudioQuality.BALANCED -> "128 кб/с >"
+                        AudioQuality.HIGH -> "320 кб/с >"
+                    },
+                    onClick = {
+                        if (onNavigateToCacheQuality != null) {
+                            onNavigateToCacheQuality()
+                        } else {
+                            val next = when (uiState.settings.audioQuality) {
+                                AudioQuality.DATA_SAVER -> AudioQuality.BALANCED
+                                AudioQuality.BALANCED -> AudioQuality.HIGH
+                                AudioQuality.HIGH -> AudioQuality.DATA_SAVER
+                            }
+                            viewModel.setAudioQuality(next)
+                        }
+                    }
                 )
-                val metaParts = buildList {
-                    if (!BuildConfig.GITHUB_REPOSITORY.startsWith("YOUR_GITHUB_OWNER")) {
-                        add("Репозиторий: ${BuildConfig.GITHUB_REPOSITORY}")
-                    }
-                    if (!signatureFingerprint.isNullOrBlank()) {
-                        add("Ключ: $signatureFingerprint")
-                    }
-                }
-                if (metaParts.isNotEmpty()) {
-                    Text(
-                        text = metaParts.joinToString(" • "),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Text(
-                    text = "Медиатека, история, настройки, эквалайзер и очередь сохраняются при обновлении",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Button(
-                    onClick = { viewModel.checkForUpdates(onShowMessage) },
-                    enabled = !isCheckingUpdate,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
-                        .testTag("check_update_button")
-                ) {
-                    if (isCheckingUpdate) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.onPrimary
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Проверка обновлений...")
-                    } else {
-                        Icon(Icons.Rounded.Refresh, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Обновить приложение")
-                    }
-                }
-            }
-        }
 
-        // Audio Quality
-        item {
-            SettingsSectionCard(
-                title = "Качество звука",
-                icon = SonoraIcons.HighQuality
-            ) {
-                AudioQuality.entries.forEach { quality ->
-                    val qualityLabel = when (quality) {
-                        AudioQuality.DATA_SAVER -> "Экономия трафика (~64 кбит/с)"
-                        AudioQuality.BALANCED -> "Сбалансированное (~128 кбит/с)"
-                        AudioQuality.HIGH -> "Высокое (максимальный поток)"
-                    }
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable { viewModel.setAudioQuality(quality) }
-                            .padding(vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(
-                            selected = uiState.settings.audioQuality == quality,
-                            onClick = { viewModel.setAudioQuality(quality) }
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = qualityLabel,
-                            style = MaterialTheme.typography.bodyLarge
-                        )
-                    }
-                }
-            }
-        }
-
-        // Playback Features
-        item {
-            SettingsSectionCard(
-                title = "Воспроизведение и аудио",
-                icon = SonoraIcons.GraphicEq
-            ) {
-                SettingsToggleRow(
-                    title = "Авторадио",
-                    subtitle = "Автоматически подбирать похожие треки после окончания очереди",
+                SettingsRowItem(
                     icon = SonoraIcons.AutoMode,
+                    title = "Умная очередь",
+                    subtitle = "Бесконечный автоподбор треков радио",
                     checked = uiState.settings.autoplayEnabled,
                     onCheckedChange = viewModel::setAutoplayEnabled,
                     testTag = "toggle_autoplay"
                 )
 
-                SettingsToggleRow(
-                    title = "Пропуск тишины",
-                    subtitle = "Сокращать тихие паузы в треках и подкастах",
+                SettingsRowItem(
                     icon = SonoraIcons.GraphicEq,
+                    title = "Плавный переход (Gapless)",
+                    subtitle = "Без паузы между треками альбома",
                     checked = uiState.settings.skipSilenceEnabled,
                     onCheckedChange = viewModel::setSkipSilenceEnabled,
                     testTag = "toggle_skip_silence"
                 )
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { showEqualizerSheet = true }
-                        .padding(vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(
-                            imageVector = SonoraIcons.Equalizer,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Column {
-                            Text("Эквалайзер", style = MaterialTheme.typography.titleMedium)
-                            Text(
-                                text = if (uiState.equalizerState.isAvailable) {
-                                    if (uiState.equalizerState.isEnabled) "Активен" else "Нажмите для настройки частот"
-                                } else {
-                                    "Включите любой трек для активации эквалайзера"
-                                },
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                    OutlinedButton(onClick = { showEqualizerSheet = true }) {
-                        Text("Открыть")
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        imageVector = SonoraIcons.Bedtime,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Text("Таймер сна", style = MaterialTheme.typography.titleMedium)
-                    uiState.playbackState.sleepTimerRemainingMs?.let { rem ->
-                        Text(
-                            text = "(осталось ${DurationFormatter.formatMillis(rem)})",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
-
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    val timerOptions = listOf(0 to "Выкл", 15 to "15 мин", 30 to "30 мин", 45 to "45 мин", 60 to "60 мин")
-                    timerOptions.forEach { (mins, label) ->
-                        val active = (mins == 0 && uiState.playbackState.sleepTimerRemainingMs == null)
-                        FilterChip(
-                            selected = active,
-                            onClick = {
-                                if (mins == 0) {
-                                    viewModel.cancelSleepTimer()
-                                    onShowMessage("Таймер сна отменён")
-                                } else {
-                                    viewModel.startSleepTimer(mins)
-                                    onShowMessage("Таймер сна установлен на $mins мин")
-                                }
-                            },
-                            label = { Text(label) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                        )
-                    }
-                }
             }
         }
 
-        // Appearance
+        // Section: ПРОФИЛЬ
         item {
-            SettingsSectionCard(
-                title = "Оформление",
-                icon = SonoraIcons.Palette
-            ) {
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    AppThemeMode.entries.forEach { mode ->
-                        val themeLabel = when (mode) {
-                            AppThemeMode.SYSTEM -> "Системная"
-                            AppThemeMode.DARK -> "Тёмная"
-                            AppThemeMode.LIGHT -> "Светлая"
+            CategoryHeader(title = "ПРОФИЛЬ")
+            GroupedSettingsCard {
+                SettingsRowItem(
+                    icon = SonoraIcons.Equalizer,
+                    title = "5-полосный эквалайзер",
+                    subtitle = "Настройка частот и баса",
+                    value = if (uiState.equalizerState.isEnabled) "Прямую >" else "Выкл >",
+                    onClick = {
+                        if (onNavigateToEqualizer != null) {
+                            onNavigateToEqualizer()
+                        } else {
+                            showEqualizerSheet = true
                         }
-                        FilterChip(
-                            selected = uiState.settings.themeMode == mode,
-                            onClick = { viewModel.setThemeMode(mode) },
-                            label = { Text(themeLabel) }
-                        )
                     }
-                }
-
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    SettingsToggleRow(
-                        title = "Динамические цвета Material You",
-                        subtitle = "Адаптировать палитру под обои системы Android",
-                        icon = SonoraIcons.ColorLens,
-                        checked = uiState.settings.dynamicColorEnabled,
-                        onCheckedChange = viewModel::setDynamicColorEnabled,
-                        testTag = "toggle_dynamic_color"
-                    )
-                }
-            }
-        }
-
-        // Cache & Backup
-        item {
-            SettingsSectionCard(
-                title = "Память и резервная копия",
-                icon = SonoraIcons.CleaningServices
-            ) {
-                val mb = String.format(Locale.US, "%.1f МБ", uiState.cacheSizeBytes / (1024f * 1024f))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Кэш аудиопотоков", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            text = "Занято $mb для быстрого повтора",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    OutlinedButton(
-                        onClick = {
-                            viewModel.clearCache { onShowMessage("Кэш аудио очищен") }
-                        },
-                        modifier = Modifier.testTag("clear_cache_button")
-                    ) {
-                        Text("Очистить")
-                    }
-                }
-
-                Text(
-                    text = "Резервная копия сохраняет избранное, историю, плейлисты, историю поиска, настройки, эквалайзер и очередь воспроизведения.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Button(
-                        onClick = { exportLauncher.launch("sonora_library_backup.json") },
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("export_backup_button")
-                    ) {
-                        Icon(SonoraIcons.FileUpload, contentDescription = null)
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Экспорт JSON")
+                SettingsRowItem(
+                    icon = SonoraIcons.FileUpload,
+                    title = "Резервная копия JSON",
+                    subtitle = "Сохранить медиатеку в файл",
+                    value = "Экспорт >",
+                    onClick = { exportLauncher.launch("sonora_library_backup.json") }
+                )
+
+                SettingsRowItem(
+                    icon = SonoraIcons.CloudDownload,
+                    title = "Версия приложения",
+                    subtitle = "Проверка обновлений Sonora",
+                    value = "v${BuildConfig.VERSION_NAME} >",
+                    onClick = {
+                        if (onNavigateToAppUpdate != null) {
+                            onNavigateToAppUpdate()
+                        } else {
+                            viewModel.checkForUpdates(onShowMessage)
+                        }
                     }
-                    OutlinedButton(
-                        onClick = { importLauncher.launch(arrayOf("application/json", "*/*")) },
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("import_backup_button")
-                    ) {
-                        Icon(SonoraIcons.FileDownload, contentDescription = null)
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Импорт JSON")
+                )
+            }
+        }
+
+        // Section: ВОСПРОИЗВЕДЕНИЕ
+        item {
+            CategoryHeader(title = "ВОСПРОИЗВЕДЕНИЕ")
+            GroupedSettingsCard {
+                val activeAccountName = accountUiState.activeAccount?.name ?: "YouTube Music"
+                SettingsRowItem(
+                    icon = SonoraIcons.AccountCircle,
+                    title = "YouTube Music",
+                    subtitle = "Аккаунт $activeAccountName",
+                    value = "Синхронизировано >",
+                    onClick = {
+                        if (onNavigateToYouTubeAccount != null) {
+                            onNavigateToYouTubeAccount()
+                        } else {
+                            onOpenYouTubeLogin(false)
+                        }
                     }
-                }
+                )
+
+                SettingsRowItem(
+                    icon = SonoraIcons.Sync,
+                    title = "Автосинхронизация плейлистов",
+                    subtitle = "Обновлять избранное при запуске",
+                    checked = accountUiState.autoSyncEnabled,
+                    onCheckedChange = accountViewModel::setAutoSyncEnabled,
+                    testTag = "toggle_youtube_autosync"
+                )
+
+                SettingsRowItem(
+                    icon = SonoraIcons.History,
+                    title = "Импорт истории прослушивания",
+                    subtitle = "Синхронизация с серверами Google",
+                    value = "22 ноя, 14:30 >",
+                    onClick = { accountViewModel.syncAndMergeActiveAccount(onShowMessage) }
+                )
+            }
+        }
+
+        // Section: АУДИО
+        item {
+            CategoryHeader(title = "АУДИО")
+            GroupedSettingsCard {
+                val mb = String.format(Locale.US, "%.1f МБ", uiState.cacheSizeBytes / (1024f * 1024f))
+                SettingsRowItem(
+                    icon = SonoraIcons.CleaningServices,
+                    title = "Кэш аудиопотоков",
+                    subtitle = "Занято $mb памяти",
+                    value = "Очистить >",
+                    onClick = { viewModel.clearCache { onShowMessage("Кэш аудио очищен") } }
+                )
+
+                SettingsRowItem(
+                    icon = SonoraIcons.FileDownload,
+                    title = "Импорт JSON",
+                    subtitle = "Восстановить медиатеку из файла",
+                    value = "Импорт >",
+                    onClick = { importLauncher.launch(arrayOf("application/json", "*/*")) }
+                )
             }
         }
     }
 }
 
 @Composable
-private fun SettingsSectionCard(
-    title: String,
-    icon: ImageVector,
-    content: @Composable () -> Unit
+private fun CategoryHeader(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.labelSmall.copy(
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.sp
+        ),
+        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+        modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
+    )
+}
+
+@Composable
+private fun GroupedSettingsCard(
+    content: @Composable ColumnScope.() -> Unit
 ) {
     Surface(
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(20.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+        ),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-            }
-            content()
-        }
+            modifier = Modifier.padding(vertical = 4.dp),
+            content = content
+        )
     }
 }
 
 @Composable
-private fun SettingsToggleRow(
+private fun SettingsRowItem(
+    icon: ImageVector,
     title: String,
     subtitle: String,
-    icon: ImageVector,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-    testTag: String
+    value: String? = null,
+    checked: Boolean? = null,
+    onCheckedChange: ((Boolean) -> Unit)? = null,
+    onClick: (() -> Unit)? = null,
+    testTag: String = ""
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .clickable { onCheckedChange(!checked) }
-            .padding(vertical = 6.dp),
+            .clickable(enabled = onClick != null || onCheckedChange != null) {
+                if (onCheckedChange != null && checked != null) {
+                    onCheckedChange(!checked)
+                } else {
+                    onClick?.invoke()
+                }
+            }
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(modifier = Modifier.width(12.dp))
+        // Left Icon in Dark Circle Container matching photo
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.width(14.dp))
+
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp
+                ),
+                color = MaterialTheme.colorScheme.onSurface
+            )
             Text(
                 text = subtitle,
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1
+            )
+        }
+
+        Spacer(modifier = Modifier.width(8.dp))
+
+        if (checked != null && onCheckedChange != null) {
+            // Bright Neon Green Switch matching reference photo
+            Switch(
+                checked = checked,
+                onCheckedChange = onCheckedChange,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                    uncheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    uncheckedTrackColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                ),
+                modifier = Modifier.testTag(testTag)
+            )
+        } else if (!value.isNullOrBlank()) {
+            Text(
+                text = value,
+                style = MaterialTheme.typography.labelMedium.copy(
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.sp
+                ),
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        Spacer(modifier = Modifier.width(8.dp))
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-            modifier = Modifier.testTag(testTag)
-        )
     }
 }
 

@@ -7,6 +7,7 @@ import android.os.Build
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,7 +16,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -36,6 +37,7 @@ import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.AlertDialog
@@ -77,6 +79,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.min
+import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -158,7 +161,7 @@ fun NowPlayingScreen(
     }
 
     val animatedBackdropTop by animateColorAsState(
-        targetValue = extractedAccent.copy(alpha = 0.62f),
+        targetValue = extractedAccent.copy(alpha = 0.5f),
         animationSpec = tween(durationMillis = 650),
         label = "player_backdrop_color"
     )
@@ -263,9 +266,7 @@ fun NowPlayingScreen(
                                     onFavoriteClick = { viewModel.toggleFavorite(queueTrack) }
                                 )
                             }
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 IconButton(
                                     onClick = { viewModel.moveQueueItem(index, index - 1) },
                                     enabled = index > 0,
@@ -382,7 +383,7 @@ fun NowPlayingScreen(
                             color = MaterialTheme.colorScheme.primary
                         )
                     } ?: Text(
-                        text = "Плавное затухание громкости в последние 5 секунд перед паузой.",
+                        text = "Плавное затухание громкости перед паузой.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -439,9 +440,10 @@ fun NowPlayingScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .widthIn(max = 560.dp)
-                .padding(horizontal = 24.dp, vertical = 12.dp),
+                .padding(horizontal = 20.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
+            // Header Top Bar matching Screen 6 ("Full-Screen Now Playing")
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -456,35 +458,36 @@ fun NowPlayingScreen(
                     Icon(
                         imageVector = Icons.Rounded.KeyboardArrowDown,
                         contentDescription = "Свернуть плеер",
-                        modifier = Modifier.size(32.dp)
+                        modifier = Modifier.size(32.dp),
+                        tint = MaterialTheme.colorScheme.onSurface
                     )
                 }
 
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.weight(1f)
+                // Center Translucent Pill Badge matching Screen 6 ("СЕЙЧАС ИГРАЕТ • УМНОЕ РАДИО 30 мин ˅")
+                val sleepTimerLabel = playback.sleepTimerRemainingMs?.let {
+                    val mins = (it / 60000L).coerceAtLeast(1L)
+                    " • $mins мин ˅"
+                } ?: " 30 мин ˅"
+
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.85f),
+                    border = androidx.compose.foundation.BorderStroke(
+                        0.5.dp,
+                        MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+                    ),
+                    modifier = Modifier.clickable { showSleepTimerDialog = true }
                 ) {
                     Text(
-                        text = "СЕЙЧАС ИГРАЕТ",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = "СЕЙЧАС ИГРАЕТ • УМНОЕ РАДИО$sleepTimerLabel",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.5.sp
+                        ),
+                        color = Color.White,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
                     )
-                    val speedActive = abs(playback.playbackSpeed - 1.0f) >= 0.05f
-                    val statusLine = buildList {
-                        playback.sleepTimerRemainingMs?.let { rem ->
-                            add("Сон: ${DurationFormatter.formatMillis(rem)}")
-                        }
-                        if (speedActive) {
-                            add(String.format(Locale.US, "%.2fx", playback.playbackSpeed).replace(".00", ""))
-                        }
-                    }.joinToString(" • ")
-                    if (statusLine.isNotEmpty()) {
-                        Text(
-                            text = statusLine,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -506,7 +509,8 @@ fun NowPlayingScreen(
                         ) {
                             Icon(
                                 imageVector = SonoraIcons.Share,
-                                contentDescription = "Поделиться треком"
+                                contentDescription = "Поделиться треком",
+                                tint = MaterialTheme.colorScheme.onSurface
                             )
                         }
                     }
@@ -518,8 +522,9 @@ fun NowPlayingScreen(
                             .testTag("player_queue_button")
                     ) {
                         Icon(
-                            imageVector = SonoraIcons.QueueMusic,
-                            contentDescription = "Открыть очередь"
+                            imageVector = Icons.Rounded.MoreVert,
+                            contentDescription = "Опции плеера",
+                            tint = MaterialTheme.colorScheme.onSurface
                         )
                     }
                 }
@@ -539,11 +544,12 @@ fun NowPlayingScreen(
                     )
                 }
             } else {
+                // Large Rounded Artwork matching Screen 6
                 BoxWithConstraints(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
-                        .padding(vertical = 8.dp),
+                        .padding(vertical = 12.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     val artSize = min(maxWidth, maxHeight).coerceAtMost(310.dp)
@@ -557,6 +563,11 @@ fun NowPlayingScreen(
                             .size(artSize)
                             .aspectRatio(1f)
                             .clip(RoundedCornerShape(24.dp))
+                            .border(
+                                width = 1.dp,
+                                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
+                                shape = RoundedCornerShape(24.dp)
+                            )
                             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                     )
                 }
@@ -591,7 +602,7 @@ fun NowPlayingScreen(
                                 ) {
                                     Icon(
                                         imageVector = Icons.Rounded.Refresh,
-                                        contentDescription = "Повторить воспроизведение",
+                                        contentDescription = "Повторить",
                                         tint = MaterialTheme.colorScheme.error
                                     )
                                 }
@@ -603,7 +614,7 @@ fun NowPlayingScreen(
                                 ) {
                                     Icon(
                                         imageVector = Icons.Rounded.Close,
-                                        contentDescription = "Скрыть ошибку",
+                                        contentDescription = "Скрыть",
                                         tint = MaterialTheme.colorScheme.error
                                     )
                                 }
@@ -611,24 +622,28 @@ fun NowPlayingScreen(
                         }
                     }
 
+                    // Track Title, Artist & Heart Icon matching Screen 6
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(
                             modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                            verticalArrangement = Arrangement.spacedBy(3.dp)
                         ) {
                             Text(
                                 text = track.title,
-                                style = MaterialTheme.typography.headlineSmall,
+                                style = MaterialTheme.typography.headlineSmall.copy(
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 24.sp
+                                ),
                                 color = MaterialTheme.colorScheme.onBackground,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
                                 text = track.artist,
-                                style = MaterialTheme.typography.bodyLarge,
+                                style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -645,24 +660,129 @@ fun NowPlayingScreen(
                             Icon(
                                 imageVector = if (isFav) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                                 contentDescription = if (isFav) "Убрать из избранного" else "В избранное",
-                                tint = if (isFav) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-
-                        IconButton(
-                            onClick = { showAddToPlaylistDialog = true },
-                            modifier = Modifier
-                                .minimumInteractiveComponentSize()
-                                .testTag("player_add_playlist_button")
-                        ) {
-                            Icon(
-                                imageVector = SonoraIcons.PlaylistAdd,
-                                contentDescription = "Добавить в плейлист"
+                                tint = if (isFav) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(26.dp)
                             )
                         }
                     }
 
-                    // Audio Tools: Lyrics, Offline, Radio, Speed, Equalizer, Sleep Timer
+                    // Seekbar Progress Slider matching Screen 6 (Electric Neon Green)
+                    NowPlayingSeekBar(
+                        progressFlow = viewModel.playbackProgress,
+                        fallbackDurationMs = playback.durationMs,
+                        onSeekTo = viewModel::seekTo
+                    )
+
+                    // Primary Playback Controls matching Screen 6
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(
+                            onClick = viewModel::toggleShuffle,
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("player_shuffle_button")
+                        ) {
+                            Icon(
+                                imageVector = SonoraIcons.Shuffle,
+                                contentDescription = "Перемешать",
+                                tint = if (playback.shuffleEnabled) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+
+                        IconButton(
+                            onClick = viewModel::skipPrevious,
+                            modifier = Modifier
+                                .size(52.dp)
+                                .testTag("player_prev_button")
+                        ) {
+                            Icon(
+                                imageVector = SonoraIcons.SkipPrevious,
+                                contentDescription = "Предыдущий трек",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(34.dp)
+                            )
+                        }
+
+                        // Large Central Neon Green Circle Play/Pause Button (`64.dp`, `#00F090`) matching Screen 6
+                        FilledIconButton(
+                            onClick = viewModel::togglePlayPause,
+                            shape = CircleShape,
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            ),
+                            modifier = Modifier
+                                .size(64.dp)
+                                .testTag("player_play_pause_button")
+                        ) {
+                            if (playback.isLoadingStream || playback.isBuffering) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(28.dp),
+                                    strokeWidth = 3.dp,
+                                    color = MaterialTheme.colorScheme.onPrimary
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = if (playback.isPlaying) {
+                                        SonoraIcons.Pause
+                                    } else {
+                                        Icons.Rounded.PlayArrow
+                                    },
+                                    contentDescription = if (playback.isPlaying) "Пауза" else "Воспроизвести",
+                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                    modifier = Modifier.size(34.dp)
+                                )
+                            }
+                        }
+
+                        IconButton(
+                            onClick = viewModel::skipNext,
+                            modifier = Modifier
+                                .size(52.dp)
+                                .testTag("player_next_button")
+                        ) {
+                            Icon(
+                                imageVector = SonoraIcons.SkipNext,
+                                contentDescription = "Следующий трек",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(34.dp)
+                            )
+                        }
+
+                        IconButton(
+                            onClick = viewModel::cycleRepeatMode,
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("player_repeat_button")
+                        ) {
+                            val repeatIcon = when (playback.repeatMode) {
+                                RepeatMode.ONE -> SonoraIcons.RepeatOne
+                                else -> SonoraIcons.Repeat
+                            }
+                            Icon(
+                                imageVector = repeatIcon,
+                                contentDescription = "Режим повтора",
+                                tint = if (playback.repeatMode != RepeatMode.OFF) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
+
+                    // Bottom Quick Tools Bar (Cast, Lyrics, Equalizer, Add to playlist, Queue) matching Screen 6
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -678,70 +798,6 @@ fun NowPlayingScreen(
                                 imageVector = SonoraIcons.Lyrics,
                                 contentDescription = "Текст песни",
                                 tint = if (uiState.lyricsState is LyricsUiState.Success) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                }
-                            )
-                        }
-
-                        val isDownloaded = track.id in uiState.downloadedIds
-                        val isDownloading = track.id in uiState.downloadingIds
-                        IconButton(
-                            onClick = { viewModel.toggleDownload(track, ::showNotice) },
-                            modifier = Modifier
-                                .minimumInteractiveComponentSize()
-                                .testTag("player_download_button")
-                        ) {
-                            if (isDownloading) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(20.dp),
-                                    strokeWidth = 2.dp
-                                )
-                            } else {
-                                Icon(
-                                    imageVector = if (isDownloaded) {
-                                        SonoraIcons.DownloadDone
-                                    } else {
-                                        SonoraIcons.DownloadForOffline
-                                    },
-                                    contentDescription = if (isDownloaded) {
-                                        "Удалить офлайн-копию"
-                                    } else {
-                                        "Скачать трек"
-                                    },
-                                    tint = if (isDownloaded) {
-                                        MaterialTheme.colorScheme.primary
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    }
-                                )
-                            }
-                        }
-
-                        IconButton(
-                            onClick = { viewModel.startRadioFromCurrentTrack(::showNotice) },
-                            modifier = Modifier
-                                .minimumInteractiveComponentSize()
-                                .testTag("player_radio_button")
-                        ) {
-                            Icon(
-                                imageVector = SonoraIcons.Radio,
-                                contentDescription = "Радио по треку",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-
-                        IconButton(
-                            onClick = { showSpeedDialog = true },
-                            modifier = Modifier
-                                .minimumInteractiveComponentSize()
-                                .testTag("player_speed_button")
-                        ) {
-                            Icon(
-                                imageVector = SonoraIcons.Speed,
-                                contentDescription = "Скорость воспроизведения",
-                                tint = if (abs(playback.playbackSpeed - 1.0f) >= 0.05f) {
                                     MaterialTheme.colorScheme.primary
                                 } else {
                                     MaterialTheme.colorScheme.onSurfaceVariant
@@ -767,127 +823,28 @@ fun NowPlayingScreen(
                         }
 
                         IconButton(
-                            onClick = { showSleepTimerDialog = true },
+                            onClick = { showAddToPlaylistDialog = true },
                             modifier = Modifier
                                 .minimumInteractiveComponentSize()
-                                .testTag("player_sleep_timer_button")
+                                .testTag("player_add_playlist_button")
                         ) {
                             Icon(
-                                imageVector = SonoraIcons.Bedtime,
-                                contentDescription = "Таймер сна",
-                                tint = if (playback.sleepTimerRemainingMs != null) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                }
+                                imageVector = SonoraIcons.PlaylistAdd,
+                                contentDescription = "Добавить в плейлист",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                    }
 
-                    NowPlayingSeekBar(
-                        progressFlow = viewModel.playbackProgress,
-                        fallbackDurationMs = playback.durationMs,
-                        onSeekTo = viewModel::seekTo
-                    )
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
                         IconButton(
-                            onClick = viewModel::toggleShuffle,
+                            onClick = { showQueueSheet = true },
                             modifier = Modifier
                                 .minimumInteractiveComponentSize()
-                                .testTag("player_shuffle_button")
+                                .testTag("player_queue_button")
                         ) {
                             Icon(
-                                imageVector = SonoraIcons.Shuffle,
-                                contentDescription = "Перемешать",
-                                tint = if (playback.shuffleEnabled) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                }
-                            )
-                        }
-
-                        IconButton(
-                            onClick = viewModel::skipPrevious,
-                            modifier = Modifier
-                                .size(56.dp)
-                                .testTag("player_prev_button")
-                        ) {
-                            Icon(
-                                imageVector = SonoraIcons.SkipPrevious,
-                                contentDescription = "Предыдущий трек",
-                                modifier = Modifier.size(36.dp)
-                            )
-                        }
-
-                        FilledIconButton(
-                            onClick = viewModel::togglePlayPause,
-                            shape = CircleShape,
-                            colors = IconButtonDefaults.filledIconButtonColors(
-                                containerColor = MaterialTheme.colorScheme.primary,
-                                contentColor = MaterialTheme.colorScheme.onPrimary
-                            ),
-                            modifier = Modifier
-                                .size(68.dp)
-                                .testTag("player_play_pause_button")
-                        ) {
-                            if (playback.isLoadingStream || playback.isBuffering) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(28.dp),
-                                    strokeWidth = 3.dp,
-                                    color = MaterialTheme.colorScheme.onPrimary
-                                )
-                            } else {
-                                Icon(
-                                    imageVector = if (playback.isPlaying) {
-                                        SonoraIcons.Pause
-                                    } else {
-                                        Icons.Rounded.PlayArrow
-                                    },
-                                    contentDescription = if (playback.isPlaying) "Пауза" else "Воспроизвести",
-                                    modifier = Modifier.size(36.dp)
-                                )
-                            }
-                        }
-
-                        IconButton(
-                            onClick = viewModel::skipNext,
-                            modifier = Modifier
-                                .size(56.dp)
-                                .testTag("player_next_button")
-                        ) {
-                            Icon(
-                                imageVector = SonoraIcons.SkipNext,
-                                contentDescription = "Следующий трек",
-                                modifier = Modifier.size(36.dp)
-                            )
-                        }
-
-                        IconButton(
-                            onClick = viewModel::cycleRepeatMode,
-                            modifier = Modifier
-                                .minimumInteractiveComponentSize()
-                                .testTag("player_repeat_button")
-                        ) {
-                            val repeatIcon = when (playback.repeatMode) {
-                                RepeatMode.ONE -> SonoraIcons.RepeatOne
-                                else -> SonoraIcons.Repeat
-                            }
-                            Icon(
-                                imageVector = repeatIcon,
-                                contentDescription = "Режим повтора",
-                                tint = if (playback.repeatMode != RepeatMode.OFF) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                }
+                                imageVector = SonoraIcons.QueueMusic,
+                                contentDescription = "Открыть очередь",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
@@ -932,7 +889,7 @@ private fun NowPlayingSeekBar(
             colors = SliderDefaults.colors(
                 thumbColor = MaterialTheme.colorScheme.primary,
                 activeTrackColor = MaterialTheme.colorScheme.primary,
-                inactiveTrackColor = MaterialTheme.colorScheme.outline
+                inactiveTrackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
             ),
             modifier = Modifier
                 .fillMaxWidth()
@@ -950,12 +907,13 @@ private fun NowPlayingSeekBar(
             }
             Text(
                 text = DurationFormatter.formatMillis(displayedPosMs),
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            val remainingMs = (effectiveDurationMs - displayedPosMs).coerceAtLeast(0L)
             Text(
-                text = DurationFormatter.formatMillis(effectiveDurationMs),
-                style = MaterialTheme.typography.labelSmall,
+                text = "-${DurationFormatter.formatMillis(remainingMs)}",
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
@@ -996,7 +954,7 @@ private fun LyricsSheetContent(
                         .height(220.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    CircularProgressIndicator()
+                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                 }
             }
 
